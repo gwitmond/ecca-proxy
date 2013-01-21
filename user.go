@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"strconv"
+	"regexp"
 	CryptoRand "crypto/rand"
 	MathRand   "math/rand"
 )
@@ -160,6 +161,9 @@ func registerAnonymous(hostname string) (*credentials){
 	return registerCN(hostname, cn)
 }
 
+// Strip the portnumber from the net.URL.Host string to get the hostname
+var hostnameRE = regexp.MustCompile("^([^:]+):[0-9]+$")
+
 // Register the named accountname at the sites' CA. Uses a new private key.	
 func registerCN(hostname string, cn string) (*credentials) {
 	log.Println("registring cn: ", cn, " for: ", hostname)
@@ -170,7 +174,13 @@ func registerCN(hostname string, cn string) (*credentials) {
 	}
 	
 	serverCred, _ := getServerCreds(hostname) // TODO, check ok-param == true
-	tr := makeCertConfig(serverCred.caCert)		
+	regURL, err := url.Parse(serverCred.registerURL)
+	check(err)
+
+	servername := getFirst(hostnameRE.FindStringSubmatch(regURL.Host))
+	log.Printf("Parsing %s gives %#v, we want: \n", serverCred.registerURL, regURL, servername)
+	
+	tr := makeCertConfig(servername, serverCred.caCert)		
 	client := &http.Client{Transport: tr}
 	
 	cert := signupPubkey(client, serverCred.registerURL, cn, priv.PublicKey)
@@ -198,6 +208,10 @@ func signupPubkey(client *http.Client, registerURL string, cn string, pub rsa.Pu
 	pubkey := publicKeyToPEM(pub)
 	resp, err := client.PostForm(registerURL, url.Values{"cn": {cn}, "pubkey": {pubkey}})
 	//TODO: check for several distict response.statuscodes
+	if err != nil {
+		log.Fatal("Error with SignPubkey request: ", err)
+	}
+	log.Printf("SignPubKey got response: %#v\n", resp)
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		panic("error reading response.body")

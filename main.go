@@ -66,11 +66,14 @@ func eccaProxy (r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Re
 }
 
 
-// create a new config struct with the given CA-Cert in PEM format
-func makeCertConfig (caCert *x509.Certificate) (*http.Transport) {
+// makeCertConfig creates a new Client Config struct with the given CA-Cert in PEM format
+// set the TLS-SNI to servername
+func makeCertConfig (servername string, caCert *x509.Certificate) (*http.Transport) {
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
-	tr := &http.Transport{ TLSClientConfig: &tls.Config{RootCAs: pool}}
+	tr := &http.Transport{ TLSClientConfig: &tls.Config{
+		RootCAs: pool,
+		ServerName: servername}}
 	return tr
 }
 
@@ -95,7 +98,7 @@ func fetchRequest(req *http.Request) (*http.Response, error) {
 	// TODO: verify if we can change client certificates in a transport struct without reusing an
 	// existing user connection. We don't want to leak the fact that these certificates belong to
 	// the same person.
-	tr := makeCertConfig(caCert)
+	tr := makeCertConfig(req.URL.Host, caCert)
 	
 	// Get the current active account and log in with it if we have it.
 	// Otherwise, just do without client certificate
