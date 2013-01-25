@@ -90,7 +90,7 @@ func fetchRequest(req *http.Request) (*http.Response, error) {
 		caCert = serverCred.caCert
 	} else {
 		// Get server certificate from DNSSEC/DANE.
-		caCert = GetCACert(req.URL.Host)
+		caCert = GetCACert(getHostname(req.URL.Host))
 	}
 
 	// create new client config at each iteration, 
@@ -98,7 +98,7 @@ func fetchRequest(req *http.Request) (*http.Response, error) {
 	// TODO: verify if we can change client certificates in a transport struct without reusing an
 	// existing user connection. We don't want to leak the fact that these certificates belong to
 	// the same person.
-	tr := makeCertConfig(req.URL.Host, caCert)
+	tr := makeCertConfig(getHostname(req.URL.Host), caCert)
 	
 	// Get the current active account and log in with it if we have it.
 	// Otherwise, just do without client certificate

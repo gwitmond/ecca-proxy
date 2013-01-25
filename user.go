@@ -161,8 +161,15 @@ func registerAnonymous(hostname string) (*credentials){
 	return registerCN(hostname, cn)
 }
 
+
 // Strip the portnumber from the net.URL.Host string to get the hostname
-var hostnameRE = regexp.MustCompile("^([^:]+):[0-9]+$")
+//var hostnameRE = regexp.MustCompile("^([^:]+):[0-9]+$")
+var hostnameRE = regexp.MustCompile("^([^:]+)")
+
+func getHostname(host string) (string) {
+	return getFirst(hostnameRE.FindStringSubmatch(host))
+}
+
 
 // Register the named accountname at the sites' CA. Uses a new private key.	
 func registerCN(hostname string, cn string) (*credentials) {
@@ -177,7 +184,7 @@ func registerCN(hostname string, cn string) (*credentials) {
 	regURL, err := url.Parse(serverCred.registerURL)
 	check(err)
 
-	servername := getFirst(hostnameRE.FindStringSubmatch(regURL.Host))
+	servername := getHostname(regURL.Host)
 	log.Printf("Parsing %s gives %#v, we want: \n", serverCred.registerURL, regURL, servername)
 	
 	tr := makeCertConfig(servername, serverCred.caCert)		
