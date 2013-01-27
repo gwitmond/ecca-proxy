@@ -181,16 +181,15 @@ func registerCN(hostname string, cn string) (*credentials) {
 	}
 	
 	serverCred, _ := getServerCreds(hostname) // TODO, check ok-param == true
-	regURL, err := url.Parse(serverCred.registerURL)
+	regURL, err := url.Parse(registerURLmap[hostname])
 	check(err)
 
 	servername := getHostname(regURL.Host)
-	log.Printf("Parsing %s gives %#v, we want: \n", serverCred.registerURL, regURL, servername)
 	
 	tr := makeCertConfig(servername, serverCred.caCert)		
 	client := &http.Client{Transport: tr}
 	
-	cert := signupPubkey(client, serverCred.registerURL, cn, priv.PublicKey)
+	cert := signupPubkey(client, regURL.String(), cn, priv.PublicKey)
 
 	var privPEM  bytes.Buffer
 	pem.Encode(&privPEM, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})

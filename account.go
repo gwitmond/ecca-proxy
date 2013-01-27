@@ -23,8 +23,8 @@ import (
 //-------------------- server data
 
 type serverCert struct {
-	realm       string   // the realm from the WWW-authenticate header
-	registerURL string   // The url of the CA-signer
+	//realm       string   // the realm from the WWW-authenticate header
+	//registerURL string   // The url of the CA-signer
 	caCert      *x509.Certificate   // the server CA-cert (must be same at Site and CA-signer)
 }
 

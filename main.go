@@ -12,6 +12,7 @@ import (
 	"log"
 	"flag"
 	"net/http"
+	"net/url"
 	"time"
 	"crypto/x509"
 	"crypto/tls"
@@ -20,6 +21,9 @@ import (
 	"bytes"
 	// "dnssec"  // TODO fork dnssec.go into separate package
 )
+
+// map between sitename and the url where to sign up for a 
+var registerURLmap = map[string]string{}
 
 // IsRepsonseRedirected checks to see if the response has any set of the known redirect codes
 func IsResponseRedirected(resp *http.Response) bool {
@@ -89,13 +93,17 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 		req.Body = ioutil.NopCloser(bytes.NewReader(body)) // copy back in again
 		if req.Form.Get("encrypt") == "required" {
 			cleartext := req.Form.Get("cleartext")
-			certificateUrl := req.Form.Get("certificate_url")
+			certificateURL := req.Form.Get("certificate_url")
 			// silly 'encryption' to see if this works
-			ciphertext := reverseString(cleartext + certificateUrl)
+
+			certURL, err := url.Parse(certificateURL)
+			certHostname := getHostname(certURL.Host)
+			client := makeClient(certHostname)			
+			ciphertext := POSTencrypt(client, certificateURL, cleartext)
 			req.Form.Set("ciphertext", ciphertext)
 
-			client, _ := makeClient(req)
-			resp, err := client.PostForm(req.URL.String(), req.Form)
+			client2 := makeClient(req.URL.Host)
+			resp, err := client2.PostForm(req.URL.String(), req.Form)
 			if err != nil {
 				log.Println("error is ", err)
 				return nil, nil
@@ -105,7 +113,6 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 	}
 
 	resp, err := fetchRequest(req, ctx)
-
 
 	if err != nil {
 		log.Println("There was an error fetching the users' request: ", err)
@@ -119,6 +126,8 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 }
 
 
+
+
 // makeCertConfig creates a new Client Config struct with the given CA-Cert in PEM format
 // set the TLS-SNI to servername
 func makeCertConfig (servername string, caCert *x509.Certificate) (*http.Transport) {
@@ -130,16 +139,20 @@ func makeCertConfig (servername string, caCert *x509.Certificate) (*http.Transpo
 	return tr
 }
 
-// makeClient creates a http client with expected server CA-certficate configured.
-func makeClient(req *http.Request) (*http.Client, *x509.Certificate) {
+// makeClient creates a http.Client struct with expected server CA-certficate configured.
+// host is name[:port]
+func makeClient(host string) (*http.Client) {
 	var caCert *x509.Certificate
-	serverCred, haveIt := getServerCreds(req.URL.Host)
+	serverCred, haveIt := getServerCreds(host)
 	if haveIt == true {
 		// use cached certificate from previous connections.
 		caCert = serverCred.caCert
 	} else {
-		// Get server certificate from DNSSEC/DANE.
-		caCert = GetCACert(getHostname(req.URL.Host))
+		// Get and cache server certificate from DNSSEC/DANE.
+		caCert = GetCACert(getHostname(host))
+		setServerCreds(host, serverCert{
+			caCert: caCert,
+		})
 	}
 
 	// create new client config at each connection 
@@ -147,18 +160,18 @@ func makeClient(req *http.Request) (*http.Client, *x509.Certificate) {
 	// TODO: verify if we can change client certificates in a transport struct without reusing an
 	// existing user connection. We don't want to leak the fact that these certificates belong to
 	// the same person.
-	tr := makeCertConfig(getHostname(req.URL.Host), caCert)
+	tr := makeCertConfig(getHostname(host), caCert)
 	
 	// Get the current active account and log in with it if we have it.
 	// Otherwise, just do without client certificate
-	cred := getLoggedInCreds(req.URL.Host)
+	cred := getLoggedInCreds(host)
 	if cred != nil {
 		cert, err := tls.X509KeyPair(cred.cert, cred.priv)
 		check(err)
 		tr.TLSClientConfig.Certificates = []tls.Certificate{cert}
 	}
 	client := &http.Client{Transport: tr}
-	return client, caCert // return the caCert so we can cache it, together with the www-autenticate data
+	return client
 }
 
 // fetchRequest fetches the original users' request.
@@ -167,7 +180,7 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 	// clean up the recycled header we got from the user
 	req.RequestURI="" 
 		
-	client, caCert := makeClient(req)
+	client := makeClient(req.URL.Host)
 	
 	log.Printf("Connecting to: %s", req.URL.String())
 	resp, err := client.Do(req)
@@ -193,15 +206,10 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 		return resp, nil
 	}
 	log.Printf("WWW-Authenticate: Ecca header found: %#v\n", auth)
-	
-	// Store the server CA credentials, we need them to log in to the CA-signer at
-	// the signup-procedure.
-	setServerCreds(ctx.Req.URL.Host, serverCert{
-		// realm: auth["realm"], 
-		registerURL: auth["register"],
-		caCert: caCert,
-	})
-	
+
+	// remember registerURL for the signup-phase
+	registerURLmap[req.Host] = auth["register"]
+
 	resp = redirectToSelector(req)
 	return resp, nil
 }
