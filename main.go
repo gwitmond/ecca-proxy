@@ -10,6 +10,7 @@ package main // eccaproxy
 import (
 	"github.com/elazarl/goproxy"
 	"log"
+	//"fmt"
 	"flag"
 	"net/http"
 	"net/url"
@@ -19,33 +20,13 @@ import (
 	MathRand   "math/rand"
 	"io/ioutil"
 	"bytes"
+	"github.com/jteeuwen/go-pkg-xmlx"
 	// "dnssec"  // TODO fork dnssec.go into separate package
 )
 
 // map between sitename and the url where to sign up for a 
 var registerURLmap = map[string]string{}
 
-// IsRepsonseRedirected checks to see if the response has any set of the known redirect codes
-func IsResponseRedirected(resp *http.Response) bool {
-	return resp.StatusCode == 301 || resp.StatusCode == 302 ||
-		resp.StatusCode == 303 || resp.StatusCode == 307
-}
-
-/* ChangeToHttp On redirect change the response location from https to http. 
-   If so the client comes back to us, he doesn't have the keys we have. */
-func ChangeToHttp(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-	if IsResponseRedirected(resp) {
-		location, _ := resp.Location()
-		if location != nil {
-			if location.Scheme == "https" {
-				location.Scheme = "http"
-				resp.Header.Set("Location", location.String())
-				println("ChangeToHttp response handler: ", ctx.Req.Host,"->",resp.Header.Get("Location"))
-			}
-		}
-	}
-	return resp
-}
 
 func main() {
 	verbose := flag.Bool("v", false, "should every proxy request be logged to stdout")
@@ -62,6 +43,9 @@ func main() {
 	proxy.OnRequest().DoFunc(eccaProxy)
 	
 	
+	// Decode any messages when we have the "Eccentric-Authentication" header
+	proxy.OnResponse().DoFunc(DecodeMessages)
+
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 	
@@ -97,12 +81,27 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 			// silly 'encryption' to see if this works
 
 			certURL, err := url.Parse(certificateURL)
+			if err != nil {
+				log.Println("error is ", err)
+				return nil, nil
+			}
+
 			certHostname := getHostname(certURL.Host)
-			client := makeClient(certHostname)			
+			client, err := makeClient(certHostname)
+			if err != nil {
+				log.Println("error is ", err)
+				return nil, nil
+			}
+
 			ciphertext := POSTencrypt(client, certificateURL, cleartext)
 			req.Form.Set("ciphertext", ciphertext)
 
-			client2 := makeClient(req.URL.Host)
+			client2, err := makeClient(req.URL.Host)
+			if err != nil {
+				log.Println("error is ", err)
+				return nil, nil
+			}
+
 			resp, err := client2.PostForm(req.URL.String(), req.Form)
 			if err != nil {
 				log.Println("error is ", err)
@@ -141,15 +140,17 @@ func makeCertConfig (servername string, caCert *x509.Certificate) (*http.Transpo
 
 // makeClient creates a http.Client struct with expected server CA-certficate configured.
 // host is name[:port]
-func makeClient(host string) (*http.Client) {
+func makeClient(host string) (*http.Client, error) {
 	var caCert *x509.Certificate
+	var err error
 	serverCred, haveIt := getServerCreds(host)
 	if haveIt == true {
 		// use cached certificate from previous connections.
 		caCert = serverCred.caCert
 	} else {
 		// Get and cache server certificate from DNSSEC/DANE.
-		caCert = GetCACert(getHostname(host))
+		caCert, err = GetCACert(getHostname(host))
+		if err != nil { return nil, err }
 		setServerCreds(host, serverCert{
 			caCert: caCert,
 		})
@@ -167,11 +168,11 @@ func makeClient(host string) (*http.Client) {
 	cred := getLoggedInCreds(host)
 	if cred != nil {
 		cert, err := tls.X509KeyPair(cred.cert, cred.priv)
-		check(err)
+		if err != nil { return nil, err }
 		tr.TLSClientConfig.Certificates = []tls.Certificate{cert}
 	}
 	client := &http.Client{Transport: tr}
-	return client
+	return client, nil
 }
 
 // fetchRequest fetches the original users' request.
@@ -180,15 +181,14 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 	// clean up the recycled header we got from the user
 	req.RequestURI="" 
 		
-	client := makeClient(req.URL.Host)
-	
+	client, err := makeClient(req.URL.Host)
+	if err != nil { return nil, err }
+
 	log.Printf("Connecting to: %s", req.URL.String())
 	resp, err := client.Do(req)
-	if err != nil {
-		log.Println("error is ", err)
-		return nil, err
-	}
+	if err != nil { return nil, err }
 
+// The rest of this function should go in a separate Response handler..
 	// test if we need to authenticate.
 	if resp.StatusCode != 401 {
 		// nope, we're done. Exit here.
@@ -216,16 +216,71 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 
 
 
+
+
+// IsRepsonseRedirected checks to see if the response has any set of the known redirect codes
+func IsResponseRedirected(resp *http.Response) bool {
+	return resp.StatusCode == 301 || resp.StatusCode == 302 ||
+		resp.StatusCode == 303 || resp.StatusCode == 307
+}
+
+/* ChangeToHttp On redirect change the response location from https to http. 
+   If so the client comes back to us, he doesn't have the keys we have. */
+func ChangeToHttp(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+	if IsResponseRedirected(resp) {
+		location, _ := resp.Location()
+		if location != nil {
+			if location.Scheme == "https" {
+				location.Scheme = "http"
+				resp.Header.Set("Location", location.String())
+				println("ChangeToHttp response handler: ", ctx.Req.Host,"->",resp.Header.Get("Location"))
+			}
+		}
+	}
+	return resp
+}
+
+
+// DecodeMessages decodes any <message><ciphertext> tags and places the result in <cleartext>
+func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+	if resp.Header.Get("Eccentric-Authentication") != "" {
+		println("DecodeMessages response handler has header: ", resp.Header.Get("Eccentric-Authentication"))
+		// get the users' Private key for this CN and hostname
+		cred := getLoggedInCreds(ctx.Req.URL.Host)
+		if cred == nil { 
+			// we are not logged in, we don't have private keys, 
+			// we cannot decode, return reponse unchanged
+			return resp 
+		}
+		
+		// Parse the response body and decode the messages from //ecca_message/ciphertext
+		// store the decoded response in //ecca_message/cleartext
+		doc := xmlx.New()
+		err := doc.LoadStream(resp.Body, nil)
+		check(err)
+
+		list := doc.SelectNodes("", "ecca_message")
+		log.Printf("list is: %#v\n", list)
+		
+		for _, message := range list {
+			ciphertext := message.S("", "ciphertext")
+			cleartext := decrypt(ciphertext, cred.priv)
+			
+			cleartextNode := message.SelectNode("", "cleartext")
+			cleartextNode.Value = cleartext
+		}
+		
+		doc.SaveDocType = false
+		body := doc.SaveBytes()
+		resp.Body = ioutil.NopCloser(bytes.NewReader(body))
+		return resp
+	}
+	return resp
+}
+
+
 // Initialise math.rand seed. Otherwise it behaves as math.seed(1). ouch..
 func init() {
 	MathRand.Seed(time.Now().UnixNano())	
 }
 
-// See rosettacode.org/wiki/Reverse_a_string#Go for better implementations
-func reverseString(s string) string {
-    r := make([]byte, len(s))
-    for i := 0; i < len(s); i++ {
-        r[i] = s[len(s)-1-i]
-    }
-    return string(r)
-}

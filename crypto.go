@@ -10,7 +10,6 @@ package main // eccaproxy
 import (
 	"log"
 	"net/http"
-	//"time"
 	"crypto/x509"
 	"io/ioutil"
 	"encoding/pem"
@@ -33,13 +32,13 @@ func POSTencrypt(client *http.Client, certificateUrl, cleartext string) string {
 
 // encrypt a cleartext message with the public key in the certificate of the recipient
 func encrypt(cleartext string, certPEM []byte) []byte {
-	tmpFile, err := ioutil.TempFile("", "ecca-cert-")
-	tmpFileName := tmpFile.Name()
-	tmpFile.Write(certPEM)
-	tmpFile.Close()
-	defer os.Remove(tmpFileName)
+	certFile, err := ioutil.TempFile("", "ecca-cert-")
+	certFileName := certFile.Name()
+	certFile.Write(certPEM)
+	certFile.Close()
+	defer os.Remove(certFileName)
 	
-	enc := exec.Command("openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", tmpFileName)
+	enc := exec.Command("openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", certFileName)
 	enc.Stdin = strings.NewReader(cleartext)
 	var out bytes.Buffer
 	enc.Stdout = &out
@@ -51,19 +50,6 @@ func encrypt(cleartext string, certPEM []byte) []byte {
 	cipherDER := out.Bytes()
 	return cipherDER
 }
-
-
-	// dec := exec.Command("openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", "anon-1230321219.privkey.pem")
-	// dec.Stdin = bytes.NewReader(cipherDER)
-	// var out2 bytes.Buffer
-	// dec.Stdout = &out2
-	// err = dec.Run()
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// clearText := out2.String()
-	// fmt.Printf("cleartext is %s\n", clearText)
-        // }
 
 // fetchCertificate GETs the url and parses the page as a PEM encoded certificate.
 func fetchCertificatePEM(client* http.Client, url string) ([]byte, error) {
@@ -88,4 +74,33 @@ func fetchCertificatePEM(client* http.Client, url string) ([]byte, error) {
 
 	// but return the PEM so we can copy it to disk for /usr/bin/openssl
 	return body, nil
+}
+
+
+
+// Decrypting a message
+func decrypt(cipherPEM string, privkeyPEM []byte) string {
+	keyFile, err := ioutil.TempFile("", "ecca-key-")
+	keyFileName := keyFile.Name()
+	keyFile.Write(privkeyPEM)
+	keyFile.Close()
+	defer os.Remove(keyFileName)
+
+	cipherBlock, _ := pem.Decode([]byte(cipherPEM))
+	if cipherBlock.Type != "ECCA ENCRYPTED MESSAGE" {
+		return "Error decoding ciphertext: expecing -----ECCA ENCRYPTED MESSAGE-----"
+	}
+	
+	dec := exec.Command("openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", keyFileName)
+	dec.Stdin = bytes.NewReader(cipherBlock.Bytes)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	dec.Stdout = &stdout
+	dec.Stderr = &stderr
+	err = dec.Run()
+	if err != nil {
+		return fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String())
+	}
+	cleartext := stdout.String()
+	return cleartext
 }

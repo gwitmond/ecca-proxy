@@ -22,7 +22,7 @@ import (
 	"unsafe"
 	"crypto/x509"
 	"log"
-	//"fmt"
+	"fmt"
 )
 
 type UbContext struct {
@@ -48,7 +48,7 @@ func UbCtxCreate(ctx *UbContext) {
 }
 
 // resolve resolves the given name into a response for an A-RR
-func Resolve(ctx *UbContext, name string, rrType int) (*UbResult) {
+func Resolve(ctx *UbContext, name string, rrType int) (*UbResult, error) {
 	log.Printf("Resolving %s for type %d", name, rrType)
 	cs := C.CString(name)
 	defer C.free(unsafe.Pointer(cs))	
@@ -58,10 +58,9 @@ func Resolve(ctx *UbContext, name string, rrType int) (*UbResult) {
 	
 	// returns 0 if OK
 	if retval == 0 {
-		return parseUbResult(result)
+		return parseUbResult(result), nil
 	}
-	log.Fatalf("Error resolving: %d, %#v. Returning nil!\n", retval, result)
-	return nil
+	return nil, fmt.Errorf("Error resolving: %s, reason: %#v", name, result)
 }
 
 type UbResult struct {
@@ -158,28 +157,35 @@ func ParseTLSA(b []byte) TLSA {
 }
 
 // GetCACert Gets server certificate from DNSSEC/DANE.
-func GetCACert(hostname string) (*x509.Certificate) {
+func GetCACert(hostname string) (*x509.Certificate, error) {
 	log.Printf("GetCaCert for %s", hostname)
- 	res := Resolve(&ctx, "_443._tcp." + hostname, 52) // tlsa
+	
+	// TODO: make the _443 a parameter of the function; change hostname into host:port
+ 	res, err := Resolve(&ctx, "_443._tcp." + hostname, 52) // tlsa
+	if err != nil {
+		return nil, err
+	}
+
  	tlsas := ParseTLSAs(res.Data)
 	// Find the first full CA certificate, ie, no hash.
 	for _, tlsa := range tlsas {
 		if tlsa.Usage == 2 && // Own CA.  
 			tlsa.Selector == 0 && // 0:  Certificate, 1: Public key
 			tlsa.MatchType == 0  { // 0: Full data, 1: sha256, 2: sha512
+			log.Printf("found correct TLSA-record\n")
 			cert, err := x509.ParseCertificate(tlsa.CertAssociation)
 			if err != nil {
-				log.Fatal("Cannot parse TLSA-certificate: ", err)
+				return nil, err
 			}
-			return cert
+			log.Printf("Parses to: %s ", cert.Subject.CommonName)
+			return cert, nil
 		}
 	}
-	log.Fatalf("No certificates with DANE parameters 2,0,0 found in DNSSEC for _443._tcp.%s\n", hostname) 
-	return nil // no certificates found in DNSSEC
+	return nil, fmt.Errorf("No DANE Record with full certificates (2,0,0) found in DNSSEC for _443._tcp.%s", hostname) 
 }
 
 
-//-------------------- INIT
+//-------------------- INIT --------------------------
 // use a global context to allow unboud to do cacheing.
 var ctx UbContext
 
