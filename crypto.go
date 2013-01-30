@@ -9,6 +9,7 @@ package main // eccaproxy
 
 import (
 	"log"
+	"fmt"
 	"net/http"
 	"crypto/x509"
 	"io/ioutil"

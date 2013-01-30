@@ -271,6 +271,7 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		}
 		
 		doc.SaveDocType = false
+		xmlx.IndentPrefix = "  "
 		body := doc.SaveBytes()
 		resp.Body = ioutil.NopCloser(bytes.NewReader(body))
 		return resp

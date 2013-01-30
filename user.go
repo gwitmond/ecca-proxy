@@ -10,6 +10,8 @@ package main // eccaproxy
 import (
 	"github.com/elazarl/goproxy"
 	"log"
+	"fmt"
+	"errors"
 	"bytes"
 	"net/http"
 	"net/url"
@@ -59,8 +61,9 @@ var selectTemplate = template.Must(template.New("select").Parse(
 
 var embedTemplate = template.Must(template.New("embed").Parse(
 `<html>
+  
 <body>
-  <p>Ecca. You are logged in {{ .Hostname }} with {{ .CN }}. 
+  <p>Ecca Proxy. You are logged in {{ .Hostname }} with {{ .CN }}. 
      Press here to logout: 
       <form method="POST" action="/manage">
        <input type="submit" name="logout" value="{{ .Hostname }}">
@@ -96,10 +99,12 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 
 
 func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	var originalURL *url.URL
+	var err error
 	req.ParseForm()
 	log.Printf("Form parameters are: %v\n", req.Form)
 	var originalRequest = req.Form.Get("originalRequest")
-	originalURL, err := url.Parse(originalRequest)
+	originalURL, err = url.Parse(originalRequest)
 	if err != nil {
 		log.Fatal("Error parsing originalRequest parameter: ", err)
 	}
@@ -117,19 +122,23 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		var cred *credentials
 		if req.Form.Get("anonymous") != "" {
 			// register with random cn
-			cred = registerAnonymous(originalURL.Host)
+			cred, err = registerAnonymous(originalURL.Host)
 		}
 		
 		if req.Form.Get("register") != "" {
 			// register with given cn
 			cn := req.Form.Get("cn")
-			cred = registerCN(originalURL.Host, cn)
+			cred, err = registerCN(originalURL.Host, cn)
 		}
 		
 		if cn := req.Form.Get("login"); cn != "" {
 			cred = getCred(originalURL.Host, cn)
 		}
-
+		
+		if err != nil {
+			resp := goproxy.NewResponse(req, "text/plain", 500, fmt.Sprintf("Error: %#v\n", err))
+			return nil, resp
+		}
 		//TODO: make sure at least on of these actions above has success
 		if (cred == nil) {
 			log.Fatal("cred should not be nil")
@@ -155,7 +164,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 
 // Register an anonymous account at the registerURL in the serverCredentials for hostname.
 // Set serverCAcert from the caPEM field.
-func registerAnonymous(hostname string) (*credentials){
+func registerAnonymous(hostname string) (*credentials, error) {
 	// create a unique userid
 	cn := "anon-" + strconv.Itoa(int(MathRand.Int31()))
 	return registerCN(hostname, cn)
@@ -172,8 +181,8 @@ func getHostname(host string) (string) {
 
 
 // Register the named accountname at the sites' CA. Uses a new private key.	
-func registerCN(hostname string, cn string) (*credentials) {
-	log.Println("registring cn: ", cn, " for: ", hostname)
+func registerCN(hostname string, cn string) (*credentials, error) {
+	log.Println("registering cn: ", cn, " for: ", hostname)
 
 	priv, err := rsa.GenerateKey(CryptoRand.Reader, 1024)
 	if err != nil {
@@ -189,12 +198,13 @@ func registerCN(hostname string, cn string) (*credentials) {
 	tr := makeCertConfig(servername, serverCred.caCert)		
 	client := &http.Client{Transport: tr}
 	
-	cert := signupPubkey(client, regURL.String(), cn, priv.PublicKey)
+	cert, err := signupPubkey(client, regURL.String(), cn, priv.PublicKey)
+	if err != nil { return nil, err }
 
 	var privPEM  bytes.Buffer
 	pem.Encode(&privPEM, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 	creds := credentials{
-		hostname: hostname,
+		Hostname: hostname,
 		realm: "",
 		CN: cn,	
 		cert: cert,
@@ -203,28 +213,35 @@ func registerCN(hostname string, cn string) (*credentials) {
 	// Register the data and set it as login certificate 
 	// It's what the user would expect from signup.
 	setCredentials(creds)
-	return &creds
+	return &creds, nil
 }
 
 
 // Signup at the registerURL with the Public key and cn for username
-// expect a 201-Created with a PEM certificate of
-// a xxx-already-taken when the cn is already in use
-func signupPubkey(client *http.Client, registerURL string, cn string, pub rsa.PublicKey) (cert []byte) {
+// expect a 201-Created with a PEM certificate or
+// a 403-forbidden when the cn is already in use
+func signupPubkey(client *http.Client, registerURL string, cn string, pub rsa.PublicKey) ([]byte, error) {
 	pubkey := publicKeyToPEM(pub)
 	resp, err := client.PostForm(registerURL, url.Values{"cn": {cn}, "pubkey": {pubkey}})
-	//TODO: check for several distict response.statuscodes
 	if err != nil {
-		log.Fatal("Error with SignPubkey request: ", err)
+		return nil, err
 	}
+
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("Username '%s' is already taken. Please choose another", cn)
+	}
+	if resp.StatusCode == 201 {	
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.New("error reading response.body")
+		}
+		
+		_ =  pemDecodeCertificate(body) // decode and panic if it fails to decode properly.
+		return body, nil
+	}
+
 	log.Printf("SignPubKey got response: %#v\n", resp)
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		panic("error reading response.body")
-	}
-	
-	_ =  pemDecodeCertificate(body) // decode and panic if it fails to decode properly.
-	return body
+	return nil, errors.New("Some error happened")
 }
 
 //------------------ Manager 
@@ -234,18 +251,31 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
 `<html>
 <body>
  <h1>Manage your Eccentric Authentication logins</h1>
- <p>This pages shows your active logins. You can log out of any.
+ <h3>Current logins</h3>
+ <p>These are your current logins. You can log out of any.
   <form method="POST">
     <table>
       <tr><th>Host</th><th>Account</th><th>Action</th></tr>
-    {{range $hostname, $cred := . }}
+    {{range $hostname, $cred := .current }}
       <tr><td>{{ $hostname }}</td><td>{{ $cred.CN }}</td><td>Logout: <input type="submit" name="logout" value="{{ $hostname }}"></td></tr>
     {{ else }}
       <tr><td colspan="3">No logins anywhere</td></tr>
     {{ end }}
     </table>
   </form>
-</body>
+
+ <h3>All your accounts at hosts</h3>
+   <p>These are all your accounts we have private keys for. You can log in to any.
+     <table>
+      <tr><th>Host</th><th>Accounts</th></tr>
+    {{range $hostname, $creds := .allCreds }}
+      <tr><td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
+         <td>{{ range $creds }}{{ .CN }}<br /> {{ end }}</td></tr>
+    {{ else }}
+      <tr><td colspan="2">No accounts anywhere</td></tr>
+    {{ end }}
+    </table>
+ </body>
 </html>`))
 
 
@@ -255,8 +285,11 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 
 	switch req.Method {
 	case "GET": 
-		// Show current logins.
-		buf  := execTemplate(showLoginTemplate, "showLogins", logins)
+		creds := mapAllCreds(getAllCreds())
+		buf  := execTemplate(showLoginTemplate, "showLogins", map[string]interface{}{
+			"current": logins,
+			"allCreds": creds,
+		})
 		resp := makeResponse(req, 200, "text/html", buf)
 		log.Println("Show logins")
 		return nil, resp
@@ -276,6 +309,15 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 	return nil, nil
 }
 
+
+func mapAllCreds(allCreds []credentials) (map[string][]credentials) {
+	creds := map[string][]credentials{}
+	for _, cred := range allCreds {
+		hostname := cred.Hostname
+		creds[hostname] = append(creds[hostname], cred)
+	}
+	return creds
+}
 
 //-- utils
 

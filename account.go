@@ -42,7 +42,7 @@ func getServerCreds (realm string) (serverCert, bool) {
 
 //-------------------- client data
 type credentials struct {
-	hostname string          // the hostname
+	Hostname string          // the hostname
 	realm    string          // the realm for these credentials. TODO: serverCA-hash
 	CN       string          // the username
 	cert     []byte          // the client certificate without private key
@@ -80,9 +80,27 @@ func setCredentials(cred credentials) {
 	check(err)
 	defer accountSt.Finalize()
 
-	count, err := accountSt.Insert(cred.hostname, cred.realm, cred.CN, cred.cert, cred.priv)
+	count, err := accountSt.Insert(cred.Hostname, cred.realm, cred.CN, cred.cert, cred.priv)
 	check(err)
 	log.Println("Inserted %d rows", count)
+}
+
+func getAllCreds () ([]credentials) {
+	accountSel, err := eccaDB.Prepare("SELECT hostname, realm, cn, certPEM, privkeyPEM FROM accounts order by hostname, cn")
+	check(err)
+	defer accountSel.Finalize()
+	
+	var creds []credentials
+	err = accountSel.Select(func(stmt *sqlite.Stmt) (err error) {
+		var cred credentials
+		var er error
+		er = stmt.Scan(&cred.Hostname, &cred.realm, &cred.CN, &cred.cert, &cred.priv)
+		check(er)
+		creds = append(creds, cred)
+		return
+	})
+	check(err)
+	return creds
 }
 
 func getCreds (hostname string) ([]credentials) {
@@ -94,7 +112,7 @@ func getCreds (hostname string) ([]credentials) {
 	err = accountSel.Select(func(stmt *sqlite.Stmt) (err error) {
 		var cred credentials
 		var er error
-		er = stmt.Scan(&cred.hostname, &cred.realm, &cred.CN, &cred.cert, &cred.priv)
+		er = stmt.Scan(&cred.Hostname, &cred.realm, &cred.CN, &cred.cert, &cred.priv)
 		check(er)
 		creds = append(creds, cred)
 		return
@@ -113,7 +131,7 @@ func getCred (hostname string, cn string) (*credentials) {
 	err = accountSel.Select(func(stmt *sqlite.Stmt) (err error) {
 		var cred credentials
 		var er error
-		er = stmt.Scan(&cred.hostname, &cred.realm, &cred.CN, &cred.cert, &cred.priv)
+		er = stmt.Scan(&cred.Hostname, &cred.realm, &cred.CN, &cred.cert, &cred.priv)
 		check(er)
 		creds = append(creds, cred)
 		return
