@@ -81,17 +81,24 @@ func fetchCertificatePEM(client* http.Client, url string) ([]byte, error) {
 
 // Decrypting a message
 func decrypt(cipherPEM string, privkeyPEM []byte) string {
+	
+	if cipherPEM == "" {
+		return "Error, no secret message here. In fact, nothing at all."
+	}
+	cipherBlock, _ := pem.Decode([]byte(cipherPEM))
+	if cipherBlock == nil {
+		return "Error, no secret message here. Nothing we could recognize."
+	}
+	if cipherBlock.Type != "ECCA ENCRYPTED MESSAGE" {
+		return "Error decoding secret message: expecing -----ECCA ENCRYPTED MESSAGE-----"
+	}
+	
 	keyFile, err := ioutil.TempFile("", "ecca-key-")
 	keyFileName := keyFile.Name()
 	keyFile.Write(privkeyPEM)
 	keyFile.Close()
 	defer os.Remove(keyFileName)
 
-	cipherBlock, _ := pem.Decode([]byte(cipherPEM))
-	if cipherBlock.Type != "ECCA ENCRYPTED MESSAGE" {
-		return "Error decoding ciphertext: expecing -----ECCA ENCRYPTED MESSAGE-----"
-	}
-	
 	dec := exec.Command("openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", keyFileName)
 	dec.Stdin = bytes.NewReader(cipherBlock.Bytes)
 	var stdout bytes.Buffer
