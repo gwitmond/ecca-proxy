@@ -10,7 +10,7 @@ package main // eccaproxy
 import (
 	"github.com/elazarl/goproxy"
 	"log"
-	//"fmt"
+	"fmt"
 	"flag"
 	"net/http"
 	"net/url"
@@ -30,7 +30,9 @@ var registerURLmap = map[string]string{}
 
 func main() {
 	verbose := flag.Bool("v", false, "should every proxy request be logged to stdout")
+	port := flag.Int("p", 8000, "port to listen to")
 	flag.Parse()
+
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 	
@@ -49,8 +51,9 @@ func main() {
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 	
-	// run or die
-	log.Fatal(http.ListenAndServe(":8000", proxy))
+	// run or die. and try ipv6.
+	go http.ListenAndServe(fmt.Sprintf("[::1]:%d", *port), proxy)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), proxy))
 }
 
 // eccaProxy: proxy the user requests and authenticate with the credentials we know.
