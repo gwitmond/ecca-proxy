@@ -57,4 +57,5 @@ Notice: as the proxy takes care of all cryptographic details, point your browser
 > | 1: error: 'sqlite3_db_readonly' undeclared (first use in this function)
 </pre>
 
-This error comes up when the sqlite3 library is too old. You'll need to update to the latest version.
+This error comes up when the sqlite3 library is too old. You'll need to update to the latest version. 
+Ubuntu 12.04 LTS has a too version, 12.10 works fine. 
