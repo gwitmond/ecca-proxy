@@ -3,7 +3,7 @@
 // Handles Eccentric Authentication in a web proxy for browsers.
 //
 // Copyright 2013, Guido Witmond <guido@witmond.nl>
-// Licensed under GPL v3 or later.
+// Licensed under AGPL v3 or later. See LICENSE
 	
 package main // eccaproxy
 
@@ -20,6 +20,7 @@ import (
 	MathRand   "math/rand"
 	"io/ioutil"
 	"bytes"
+	"encoding/xml"
 	"github.com/jteeuwen/go-pkg-xmlx"
 	// "dnssec"  // TODO fork dnssec.go into separate package
 )
@@ -65,30 +66,36 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 		req.URL.Scheme = "https"
 	}
 	
-	// Copy the body to when we need it untouched. We need to parse the POST parameters and that 
-	// eats the buffer
+	// Copy the body because we need it untouched. But we also need to parse 
+	// the POST parameters and that eats the original buffer with the body
 	body, err := ioutil.ReadAll(req.Body)
 	check(err)
 	
 	// give it back immedeately.
 	req.Body = ioutil.NopCloser(bytes.NewReader(body))
+	
+	// Read the parameters
+	req.ParseForm()  // eats req.Body
+	req.Body = ioutil.NopCloser(bytes.NewReader(body)) // copy back in again
 
 	// Check for POST method with 'encrypt' param. 
 	// transparantly encrypt the data.
 	if req.Method == "POST" {
-		req.ParseForm()  // eats req.Body
-		req.Body = ioutil.NopCloser(bytes.NewReader(body)) // copy back in again
 		if req.Form.Get("encrypt") == "required" {
 			cleartext := req.Form.Get("cleartext")
 			certificateURL := req.Form.Get("certificate_url")
-			// silly 'encryption' to see if this works
-
+			
 			certURL, err := url.Parse(certificateURL)
 			if err != nil {
 				log.Println("error is ", err)
 				return nil, nil
 			}
-
+			
+			// encode query-parameters properly.
+			q := certURL.Query()
+			certURL.RawQuery = q.Encode()
+			log.Printf("certificateURL is: %v, RawQuery is %#v, RequestURI is %v\n", certificateURL, certURL.Query(), certURL.RequestURI())
+			
 			certHostname := getHostname(certURL.Host)
 			client, err := makeClient(certHostname)
 			if err != nil {
@@ -96,7 +103,7 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 				return nil, nil
 			}
 
-			ciphertext := POSTencrypt(client, certificateURL, cleartext)
+			ciphertext := POSTencrypt(client, certURL.String(), cleartext)
 			req.Form.Set("ciphertext", ciphertext)
 
 			client2, err := makeClient(req.URL.Host)
@@ -130,8 +137,8 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 
 
 
-// makeCertConfig creates a new Client Config struct with the given CA-Cert in PEM format
-// set the TLS-SNI to servername
+// makeCertConfig creates a new Client Config struct with the given CA-Cert in PEM format.
+// Set the TLS-SNI to servername to those who have shared ipv4-addressess
 func makeCertConfig (servername string, caCert *x509.Certificate) (*http.Transport) {
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
@@ -163,7 +170,7 @@ func makeClient(host string) (*http.Client, error) {
 	// just to make sure that we don't reuse previously used certificates when a user changes accounts
 	// TODO: verify if we can change client certificates in a transport struct without reusing an
 	// existing user connection. We don't want to leak the fact that these certificates belong to
-	// the same person.
+	// the same person. 
 	tr := makeCertConfig(getHostname(host), caCert)
 	
 	// Get the current active account and log in with it if we have it.
@@ -205,7 +212,7 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 	auth := ParseWWWAuthHeader(resp.Header.Get("Www-Authenticate"))
 	if auth == nil {
 		// No Ecca-authentication required. We're done. Exit here.
-		log.Printf("No WWW-Auhtenticate: Ecca header, sending 401 response to client")
+		log.Printf("No WWW-Authenticate: Ecca header, sending 401 response to client")
 		return resp, nil
 	}
 	log.Printf("WWW-Authenticate: Ecca header found: %#v\n", auth)
@@ -223,12 +230,14 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 
 // IsRepsonseRedirected checks to see if the response has any set of the known redirect codes
 func IsResponseRedirected(resp *http.Response) bool {
-	return resp.StatusCode == 301 || resp.StatusCode == 302 ||
-		resp.StatusCode == 303 || resp.StatusCode == 307
+	return  resp.StatusCode == 301 || 
+		resp.StatusCode == 302 ||
+		resp.StatusCode == 303 || 
+		resp.StatusCode == 307
 }
 
-/* ChangeToHttp On redirect change the response location from https to http. 
-   If so the client comes back to us, he doesn't have the keys we have. */
+// ChangeToHttp On redirect change the response location from https to http. 
+// It makes the client come back to us over http.
 func ChangeToHttp(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 	if IsResponseRedirected(resp) {
 		location, _ := resp.Location()
@@ -245,9 +254,20 @@ func ChangeToHttp(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 
 
 // DecodeMessages decodes any <message><ciphertext> tags and places the result in <cleartext>
+// Decode only when ?decode=true is passed. To show that it's the proxy doing decoding.
 func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 	if resp.Header.Get("Eccentric-Authentication") != "" {
 		println("DecodeMessages response handler has header: ", resp.Header.Get("Eccentric-Authentication"))
+		// get whether the user wants to decode the encrypted messages
+		decode := ctx.Req.Form.Get("decode") == "true"
+		
+		// create the link that allows him to set that request
+		decodeURL := ctx.Req.URL
+		if decodeURL.Scheme == "https" { decodeURL.Scheme = "http" }
+		query := decodeURL.Query()
+		query.Set("decode", "true")
+		decodeURL.RawQuery = query.Encode()
+		
 		// get the users' Private key for this CN and hostname
 		cred := getLoggedInCreds(ctx.Req.URL.Host)
 		if cred == nil { 
@@ -266,11 +286,32 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		log.Printf("list is: %#v\n", list)
 		
 		for _, message := range list {
-			ciphertext := message.S("", "ciphertext")
-			cleartext := decrypt(ciphertext, cred.priv)
+
+			log.Printf("Message is %#v\n", message)
+			ciphertextNode := message.SelectNode("", "ciphertext")
+			cleartextNode  := message.SelectNode("", "cleartext")
 			
-			cleartextNode := message.SelectNode("", "cleartext")
-			cleartextNode.Value = cleartext
+			if decode == true {
+				// replace cleartext with decrypted ciphertext
+				//ciphertext := message.S("", "ciphertext")
+				ciphertext := ciphertextNode.Value // may return nil-pointer error
+				cleartext := decrypt(ciphertext, cred.priv)
+				cleartextNode.Value = cleartext
+				
+				// take out the ciphertext
+				ciphertextNode.Value = "Here is the decoded message:"
+			} else {
+				// tell user how to get decoded output
+				cleartextNode.Value = ""
+
+				// make the xml-node
+				node := xmlx.NewNode(xmlx.NT_ELEMENT)
+				node.Name = xml.Name{"", "a"}
+				node.Attributes = append(node.Attributes,
+					&xmlx.Attr{xml.Name{"", "href"}, decodeURL.String()})
+				node.Value = "Message is encoded. Press here to decode"
+				cleartextNode.AddChild(node)
+			}
 		}
 		
 		doc.SaveDocType = false
