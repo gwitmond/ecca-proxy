@@ -66,7 +66,8 @@ var embedTemplate = template.Must(template.New("embed").Parse(
   <p>Ecca Proxy. You are logged in {{ .Hostname }} with {{ .CN }}. 
      Press here to logout: 
       <form method="POST" action="/manage">
-       <input type="submit" name="logout" value="{{ .Hostname }}">
+        <input type="hidden" name="logout" value="{{ .Hostname }}">
+        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
       </form></p>
 <hr>
   <iframe src="{{ .URL }}" width="100%" height="100%">
@@ -76,7 +77,8 @@ var embedTemplate = template.Must(template.New("embed").Parse(
      <br>
      To log out:
       <form method="POST" action="/manage">
-        <input type="submit" name="logout" value="{{ .Hostname }}">
+        <input type="hidden" name="logout" value="{{ .Hostname }}">
+        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
        </form>]
   </iframe>
 </body>
@@ -252,27 +254,37 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
 <body>
  <h1>Manage your Eccentric Authentication logins</h1>
  <h3>Current logins</h3>
- <p>These are your current logins. You can log out of any.
-  <form method="POST">
+  {{ if .current }}
+  <p>These are your current logins.
     <table>
       <tr><th>Host</th><th>Account</th><th>Action</th></tr>
     {{range $hostname, $cred := .current }}
-      <tr><td>{{ $hostname }}</td><td>{{ $cred.CN }}</td><td>Logout: <input type="submit" name="logout" value="{{ $hostname }}"></td></tr>
-    {{ else }}
-      <tr><td colspan="3">No logins anywhere</td></tr>
+      <tr><td>{{ $hostname }}</td>
+          <td>{{ $cred.CN }}</td>
+          <td>
+            <form method="POST">
+              <input type="hidden" name="logout" value="{{ .Hostname }}">
+              <input type="submit" name="button" value="Log out of {{ .Hostname }}">
+            </form>
+          </td>
+      </tr>
+     </table>
     {{ end }}
-    </table>
-  </form>
+ {{ else }}
+   <p><em>You are not logged in anywhere.</em></p>
+ {{ end }}
+  
+
 
  <h3>All your accounts at hosts</h3>
-   <p>These are all your accounts we have private keys for. You can log in to any.
+   <p>These are all your accounts we have private keys for. You can log in to any. Just cllick on the host. You'll get to choose the account when the sites asks for one.
      <table>
       <tr><th>Host</th><th>Accounts</th></tr>
     {{range $hostname, $creds := .allCreds }}
       <tr><td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
          <td>{{ range $creds }}{{ .CN }}<br /> {{ end }}</td></tr>
     {{ else }}
-      <tr><td colspan="2">No accounts anywhere</td></tr>
+      <tr><td colspan="2">You have no accounts anywhere. </td></tr>
     {{ end }}
     </table>
  </body>
