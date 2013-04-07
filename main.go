@@ -177,7 +177,7 @@ func makeClient(host string) (*http.Client, error) {
 	// Otherwise, just do without client certificate
 	cred := getLoggedInCreds(host)
 	if cred != nil {
-		cert, err := tls.X509KeyPair(cred.cert, cred.priv)
+		cert, err := tls.X509KeyPair(cred.Cert, cred.Priv)
 		if err != nil { return nil, err }
 		tr.TLSClientConfig.Certificates = []tls.Certificate{cert}
 	}
@@ -295,7 +295,7 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 				// replace cleartext with decrypted ciphertext
 				//ciphertext := message.S("", "ciphertext")
 				ciphertext := ciphertextNode.Value // may return nil-pointer error
-				cleartext := decrypt(ciphertext, cred.priv)
+				cleartext := decrypt(ciphertext, cred.Priv)
 				cleartextNode.Value = cleartext
 				
 				// take out the ciphertext

@@ -3,7 +3,7 @@
 // Handles Eccentric Authentication in a web proxy for browsers.
 //
 // Copyright 2013, Guido Witmond <guido@witmond.nl>
-// Licensed under GPL v3 or later.
+// Licensed under AGPL v3 or later. See LICENSE
 	
 package main // eccaproxy
 
@@ -60,6 +60,8 @@ func fetchCertificatePEM(client* http.Client, url string) ([]byte, error) {
 
 	body, err := ioutil.ReadAll(resp.Body)
 	check(err)
+
+	log.Printf("Received: %q\n", body)
 
 	// decode pem..., 
 	pemBlock, _ := pem.Decode(body)

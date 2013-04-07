@@ -3,7 +3,7 @@
 // Handles Eccentric Authentication in a web proxy for browsers.
 //
 // Copyright 2013, Guido Witmond <guido@witmond.nl>
-// Licensed under GPL v3 or later.
+// Licensed under AGPL v3 or later. See LICENSE
 
 package main // eccaproxy
 
@@ -191,7 +191,8 @@ func registerCN(hostname string, cn string) (*credentials, error) {
 		panic("cannot generate private key")
 	}
 	
-	serverCred, _ := getServerCreds(hostname) // TODO, check ok-param == true
+	serverCred, exists := getServerCreds(hostname)
+	if exists == false { panic("We don't have any server credentials for <hostname>") }
 	regURL, err := url.Parse(registerURLmap[hostname])
 	check(err)
 
@@ -207,10 +208,10 @@ func registerCN(hostname string, cn string) (*credentials, error) {
 	pem.Encode(&privPEM, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 	creds := credentials{
 		Hostname: hostname,
-		realm: "",
+		Realm: "",
 		CN: cn,	
-		cert: cert,
-		priv: privPEM.Bytes(),
+		Cert: cert,
+		Priv: privPEM.Bytes(),
 	}
 	// Register the data and set it as login certificate 
 	// It's what the user would expect from signup.
@@ -256,7 +257,7 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
  <h3>Current logins</h3>
   {{ if .current }}
   <p>These are your current logins.
-    <table>
+   <table>
       <tr><th>Host</th><th>Account</th><th>Action</th></tr>
     {{range $hostname, $cred := .current }}
       <tr><td>{{ $hostname }}</td>
@@ -268,8 +269,8 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
             </form>
           </td>
       </tr>
-     </table>
     {{ end }}
+   </table>
  {{ else }}
    <p><em>You are not logged in anywhere.</em></p>
  {{ end }}
