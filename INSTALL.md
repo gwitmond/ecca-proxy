@@ -2,7 +2,7 @@
 
 ## user setup  
 
-(if you want to keep *my* code of of *your* home directory)
+(if you want to keep *my* code out of *your* home directory)
 
     useradd -m -U eccaproxy
     usermod -p 'no-password-login' eccaproxy
