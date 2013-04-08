@@ -24,8 +24,10 @@
 
     sudo apt-get install libunbound-dev libssl-dev
     
+## build it    
     cd gopath/src
     go get github.com/gwitmond/ecca-proxy
+    make
 
 it should build without errors
 
