@@ -30,6 +30,7 @@ import (
 var eccaHandlerHost = "ecca.handler"
 var eccaHandlerPath = "/select"
 var eccaManagerPath = "/manage"
+var eccaShowCertPath= "/showcert"
 
 
 func redirectToSelector(req *http.Request) (*http.Response) {
@@ -69,6 +70,7 @@ var embedTemplate = template.Must(template.New("embed").Parse(
         <input type="hidden" name="logout" value="{{ .Hostname }}">
         <input type="submit" name="button" value="Log out of {{ .Hostname }}">
       </form></p>
+<p>Click here to go to the <a href="/manage">management page</a> of the proxy</p>
 <hr>
   <iframe src="{{ .URL }}" width="100%" height="100%">
     [Your user agent does not support frames or is currently configured
@@ -94,6 +96,8 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 		return handleSelect(req, ctx)
 	case eccaManagerPath:
 		return handleManager(req, ctx)
+	//case eccaShowCertPath:
+	//	return handleShowCert(req, ctx)
 	}
 	log.Printf("Unexpected request: %#v\n", req)
 	return nil, nil
@@ -229,22 +233,24 @@ func signupPubkey(client *http.Client, registerURL string, cn string, pub rsa.Pu
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.New("error reading response.body")
+	}
 
 	if resp.StatusCode == 403 {
 		return nil, fmt.Errorf("Username '%s' is already taken. Please choose another", cn)
 	}
+
 	if resp.StatusCode == 201 {	
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errors.New("error reading response.body")
-		}
-		
 		_ =  pemDecodeCertificate(body) // decode and panic if it fails to decode properly.
 		return body, nil
 	}
 
 	log.Printf("SignPubKey got response: %#v\n", resp)
-	return nil, errors.New("Some error happened")
+	
+	return nil, errors.New(fmt.Sprintf("Some error happened: %s ", body))
 }
 
 //------------------ Manager 
@@ -278,12 +284,18 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
 
 
  <h3>All your accounts at hosts</h3>
-   <p>These are all your accounts we have private keys for. You can log in to any. Just cllick on the host. You'll get to choose the account when the sites asks for one.
+   <p>These are all your accounts we have private keys for. 
+     <br>You can log in to any. Just click on the host name to get there anonymously. 
+     <br>You'll get to choose the account when the sites asks for one.
      <table>
-      <tr><th>Host</th><th>Accounts</th></tr>
-    {{range $hostname, $creds := .allCreds }}
-      <tr><td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
-         <td>{{ range $creds }}{{ .CN }}<br /> {{ end }}</td></tr>
+      <tr><th>Host</th><th>Accounts</th><th>Show full certificate</th>
+      {{range $hostname, $creds := .allCreds }}
+         <tr>
+          <td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
+         <td>{{ range $creds }} {{ .CN }} <br> {{ end }}</td>
+         <td>{{ range $creds }} <a href="/showcert?cn={{.CN}}">show {{.CN}} </a><br> {{ end }}</td>
+        </tr>
+
     {{ else }}
       <tr><td colspan="2">You have no accounts anywhere. </td></tr>
     {{ end }}
@@ -321,6 +333,35 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 	log.Fatal("Unexpected method: ", req.Method)
 	return nil, nil
 }
+
+// func handleShowCert (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+// 	cn := req.FormValue("cn")
+
+// 	switch req.Method {
+// 	case "GET": 
+// 		creds := mapAllCreds(getAllCreds())
+// 		buf  := execTemplate(showLoginTemplate, "showLogins", map[string]interface{}{
+// 			"current": logins,
+// 			"allCreds": creds,
+// 		})
+// 		resp := makeResponse(req, 200, "text/html", buf)
+// 		log.Println("Show logins")
+// 		return nil, resp
+// 	case "POST":
+// 		if hostname := req.Form.Get("logout"); hostname != "" {
+// 			// log out from hostname 
+// 			logout(hostname)
+// 			log.Println("Logged out of ", hostname)
+// 		}
+
+// 		// redirect back to ourself
+// 		resp := makeRedirect(req, req.URL)
+// 		return nil, resp
+// 	}
+	
+// 	log.Fatal("Unexpected method: ", req.Method)
+// 	return nil, nil
+// }
 
 
 func mapAllCreds(allCreds []credentials) (map[string][]credentials) {

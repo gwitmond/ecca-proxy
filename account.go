@@ -43,7 +43,7 @@ func getServerCreds (realm string) (serverCert, bool) {
 //-------------------- client data
 type credentials struct {
 	Hostname string          // the hostname
-	Realm    string          // the realm for these credentials. TODO: serverCA-hash
+	Realm    string          // the realm for these credentials.  (The part after the @@? )
 	CN       string          // the username
 	Cert     []byte          // the client certificate without private key
 	Priv     []byte          // the private key that matches the certificate.

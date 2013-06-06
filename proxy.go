@@ -25,14 +25,17 @@ import (
 	// "dnssec"  // TODO fork dnssec.go into separate package
 )
 
-// map between sitename and the url where to sign up for a 
+// map between sitename and the url where to sign up for a certificate
 var registerURLmap = map[string]string{}
 
+var port = flag.Int("p", 8000, "port to listen to")
+var verbose = flag.Bool("v", false, "should every proxy request be logged to stdout")
+var registry = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1446/", "The Registry of (dis)honesty to query for duplicate certificates.")
 
 func main() {
-	verbose := flag.Bool("v", false, "should every proxy request be logged to stdout")
-	port := flag.Int("p", 8000, "port to listen to")
 	flag.Parse()
+
+	log.Printf("registry is %v\n", *registry) // to stop the complaint from compiler
 
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
