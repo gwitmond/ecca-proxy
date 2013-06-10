@@ -30,13 +30,12 @@ var registerURLmap = map[string]string{}
 
 var port = flag.Int("p", 8000, "port to listen to")
 var verbose = flag.Bool("v", false, "should every proxy request be logged to stdout")
-var registry = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1446/", "The Registry of (dis)honesty to query for duplicate certificates.")
+// For future use: see http://eccentric-authentication.org/
+//var registry = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1446/", "The Registry of (dis)honesty to query for duplicate certificates.")
 
 func main() {
 	flag.Parse()
-
-	log.Printf("registry is %v\n", *registry) // to stop the complaint from compiler
-
+	
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 	
@@ -56,7 +55,13 @@ func main() {
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 	
 	// run or die. and try ipv6.
+	log.Printf("We are starting at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
+	log.Printf("Configure your browser to use one of those as http-proxy.\n")
+	log.Printf("Then browse to http://www.ecca.wtmnd.nl  or http://dating.wtmnd.nl:10443/\n")
+	log.Printf("Use http (not https) to benefit from this proxy.\n")
+	log.Printf("For assistence, please see: http://eccentric-authentication.org/contact.html\n")
 	go http.ListenAndServe(fmt.Sprintf("[::1]:%d", *port), proxy)
+
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), proxy))
 }
 

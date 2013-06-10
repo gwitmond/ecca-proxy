@@ -1,5 +1,9 @@
 ## Installation of the Ecca-Proxy User Agent from source
 
+## prefab
+
+There is a prefab 64-bit binary for Debian 7.0 (Wheezy and later) at my [blog](http://eccentric-authentication.org/blog/2013/06/07/run-it-yourself.html). 
+
 ## user setup  
 
 (if you want to keep *my* code out of *your* home directory)
