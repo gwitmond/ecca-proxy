@@ -37,7 +37,7 @@ func main() {
 	flag.Parse()
 	
 	proxy := goproxy.NewProxyHttpServer()
-	proxy.Verbose = *verbose
+	proxy.Verbose = true // *verbose
 	
 	// Requests for eccaHandlerHost allow the user to select and create certificates
 	// This handler sends a response
@@ -48,8 +48,11 @@ func main() {
 	proxy.OnRequest().DoFunc(eccaProxy)
 	
 	
-	// Decode any messages when we have the "Eccentric-Authentication" header
+	// Decode any messages when we have the "Eccentric-Authentication" header set to "decrypt"
 	proxy.OnResponse().DoFunc(DecodeMessages)
+
+	// Verify any messages where we have the Eccentric-Authentication header set to "verification"
+	proxy.OnResponse().DoFunc(VerifyMessages)
 
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
@@ -90,45 +93,14 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 	// transparantly encrypt the data.
 	if req.Method == "POST" {
 		if req.Form.Get("encrypt") == "required" {
-			cleartext := req.Form.Get("cleartext")
-			certificateURL := req.Form.Get("certificate_url")
-			
-			certURL, err := url.Parse(certificateURL)
-			if err != nil {
-				log.Println("error is ", err)
-				return nil, nil
-			}
-			
-			// encode query-parameters properly.
-			q := certURL.Query()
-			certURL.RawQuery = q.Encode()
-			log.Printf("certificateURL is: %v, RawQuery is %#v, RequestURI is %v\n", certificateURL, certURL.Query(), certURL.RequestURI())
-			
-			certHostname := getHostname(certURL.Host)
-			client, err := makeClient(certHostname)
-			if err != nil {
-				log.Println("error is ", err)
-				return nil, nil
-			}
-
-			ciphertext := POSTencrypt(client, certURL.String(), cleartext)
-			req.Form.Set("ciphertext", ciphertext)
-
-			client2, err := makeClient(req.URL.Host)
-			if err != nil {
-				log.Println("error is ", err)
-				return nil, nil
-			}
-
-			resp, err := client2.PostForm(req.URL.String(), req.Form)
-			if err != nil {
-				log.Println("error is ", err)
-				return nil, nil
-			}
-			return nil, resp
+			return encryptMessage(req)
 		}
+		// Now see if we need to sign 
+		if req.Form.Get("sign") == "required" {
+			return signMessage(req)
+		}
+		//TODO: handle singning and encrypting at one operation for secure messaging.
 	}
-
 	resp, err := fetchRequest(req, ctx)
 
 	if err != nil {
@@ -142,7 +114,78 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 	return nil, resp // let goproxy send our response
 }
 
+// encrypt a message with a public key from a certificate in the url.	
+func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
+	cleartext := req.Form.Get("cleartext")
+	certificateURL := req.Form.Get("certificate_url")
+	
+	certURL, err := url.Parse(certificateURL)
+	if err != nil {
+		log.Println("error is ", err)
+		return nil, nil
+	}
+	
+	// encode query-parameters properly.
+	q := certURL.Query()
+	certURL.RawQuery = q.Encode()
+	log.Printf("certificateURL is: %v, RawQuery is %#v, RequestURI is %v\n", certificateURL, certURL.Query(), certURL.RequestURI())
+	
+	certHostname := getHostname(certURL.Host)
+	client, err := makeClient(certHostname)
+	if err != nil {
+		log.Println("error is ", err)
+		return nil, nil
+	}
+	
+	ciphertext := POSTencrypt(client, certURL.String(), cleartext)
+	req.Form.Set("ciphertext", string(ciphertext))
+	
+	client2, err := makeClient(req.URL.Host)
+	if err != nil {
+		log.Println("error is ", err)
+		return nil, nil
+	}
+	
+	resp, err := client2.PostForm(req.URL.String(), req.Form)
+	if err != nil {
+		log.Println("error is ", err)
+		return nil, nil
+	}
+	return nil, resp
+}
 
+
+// signMessage signs a message with our current logged in account (private key) and adds the signature to the original request. Then it sends it on to the web site.
+func signMessage(req  *http.Request)  (*http.Request, *http.Response) {
+	cleartext := req.Form.Get("cleartext") // cleartext is the message, for now we ignore the title and other fields
+	
+	// get the current logged in account (and private key)
+	creds := getLoggedInCreds(req.URL.Host)
+	if creds == nil {
+		log.Println("Form says to sign a message but no user is logged in. Configure server to require login before handing the form.\n")
+		return nil, goproxy.NewResponse(req,
+			goproxy.ContentTypeText, http.StatusInternalServerError,
+			"Server says to sign your message but you haven't logged in. Please log in first, then type your message again. Later we might cache your data and redirect you to the login-screen.")
+	}
+	
+	//signature := "sig" + cleartext //
+	signature := Sign(creds.Priv, creds.Cert, cleartext)
+	req.Form.Set("signature", signature)   // add signature to the request
+
+	// TODO: refactor this duplicate code from encryptMessage
+	client2, err := makeClient(req.URL.Host)
+	if err != nil {
+		log.Println("error is ", err)
+		return nil, nil
+	}
+	
+	resp, err := client2.PostForm(req.URL.String(), req.Form)
+	if err != nil {
+		log.Println("error is ", err)
+		return nil, nil
+	}
+	return nil, resp
+}
 
 
 // makeCertConfig creates a new Client Config struct with the given CA-Cert in PEM format.
@@ -264,7 +307,7 @@ func ChangeToHttp(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 // DecodeMessages decodes any <message><ciphertext> tags and places the result in <cleartext>
 // Decode only when ?decode=true is passed. To show that it's the proxy doing decoding.
 func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-	if resp.Header.Get("Eccentric-Authentication") != "" {
+	if resp.Header.Get("Eccentric-Authentication") ==  "decryption=\"required\"" {
 		println("DecodeMessages response handler has header: ", resp.Header.Get("Eccentric-Authentication"))
 		// get whether the user wants to decode the encrypted messages
 		decode := ctx.Req.Form.Get("decode") == "true"
@@ -303,7 +346,7 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 				// replace cleartext with decrypted ciphertext
 				//ciphertext := message.S("", "ciphertext")
 				ciphertext := ciphertextNode.Value // may return nil-pointer error
-				cleartext := decrypt(ciphertext, cred.Priv)
+				cleartext := Decrypt([]byte(ciphertext), cred.Priv)
 				cleartextNode.Value = cleartext
 				
 				// take out the ciphertext
@@ -331,6 +374,78 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 	return resp
 }
 
+// VerifyMessages verifies the signature on a message and show whether it is correct. 
+// If signature is correct, show the details on the page.
+// Verify only when ?verify=true is passed. To show that it's the proxy doing verifying.
+func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+	if resp.Header.Get("Eccentric-Authentication") ==  "verify" {
+		println("VerifyMessage response handler has header: ", resp.Header.Get("Eccentric-Authentication"))
+		// get whether the user wants to decode the encrypted messages
+		//verify := ctx.Req.Form.Get("verify") == "true"
+		
+		// create the link that allows him to set that request
+		//verifyURL := ctx.Req.URL
+		//if verifyURL.Scheme == "https" { verifyURL.Scheme = "http" }
+		//query := verifyURL.Query()
+		//query.Set("verify", "true")
+		//verifyURL.RawQuery = query.Encode()
+		
+		// get the users' Private key for this CN and hostname
+		//cred := getLoggedInCreds(ctx.Req.URL.Host)
+		//if cred == nil { 
+		//	// we are not logged in, we don't have private keys, 
+		//	// we cannot decode, return reponse unchanged
+		//	return resp 
+		//}
+		
+		// Parse the response body and decode the messages from //ecca_message/ciphertext
+		// store the decoded response in //ecca_message/cleartext
+		doc := xmlx.New()
+		err := doc.LoadStream(resp.Body, nil)
+		check(err)
+
+		list := doc.SelectNodes("", "blog")
+		log.Printf("list is: %#v\n", list)
+		
+		for _, blog := range list {
+
+			log.Printf("Message is %#v\n", blog)
+			blogtextNode := blog.SelectNode("", "blog_text")
+			signatureNode  := blog.SelectNode("", "blog_signature")
+			validationNode := blog.SelectNode("", "blog_validation")
+			
+			//if verify == true {
+			blogtext := blogtextNode.Value // may return nil-pointer error
+			signature := signatureNode.Value
+			valid, message := Verify(blogtext, signature) // partial validation. 
+			// TODO: verify certificate certificate chain
+			
+			blogtextNode.Value = message
+			signatureNode.Value = ""
+			validationNode.Value = fmt.Sprintf("Signature valid: %v", valid)
+				
+			// } else {
+			// 	// tell user how to get decoded output
+			// 	cleartextNode.Value = ""
+
+			// 	// make the xml-node
+			// 	node := xmlx.NewNode(xmlx.NT_ELEMENT)
+			// 	node.Name = xml.Name{"", "a"}
+			// 	node.Attributes = append(node.Attributes,
+			// 		&xmlx.Attr{xml.Name{"", "href"}, decodeURL.String()})
+			// 	node.Value = "Message is encoded. Press here to decode"
+			// 	cleartextNode.AddChild(node)
+			// }
+		}
+		
+		doc.SaveDocType = false
+		xmlx.IndentPrefix = "  "
+		body := doc.SaveBytes()
+		resp.Body = ioutil.NopCloser(bytes.NewReader(body))
+		return resp
+	}
+	return resp
+}
 
 // Initialise math.rand seed. Otherwise it behaves as math.seed(1). ouch..
 func init() {
