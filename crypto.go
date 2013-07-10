@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"crypto/x509"
+	"io"
 	"io/ioutil"
 	"encoding/pem"
 	"errors"
@@ -33,16 +34,12 @@ func POSTencrypt(client *http.Client, certificateUrl, cleartext string) []byte {
 func Encrypt(cleartext string, certPEM []byte) []byte {
 	certFileName := makeTempfile("ecca-cert", certPEM)
 	defer os.Remove(certFileName)
-	
-	enc := exec.Command("openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", certFileName)
-	enc.Stdin = strings.NewReader(cleartext)
-	var out bytes.Buffer
-	enc.Stdout = &out
-	err := enc.Run()
+	err, stdout, _ := run(strings.NewReader(cleartext), 
+		"openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", certFileName)
 	if err != nil {
 		log.Fatal(err)
 	}
-	cipherDER := out.Bytes()
+	cipherDER := stdout.Bytes()
 	cipherPEM := pem.EncodeToMemory(&pem.Block{Type: "ECCA ENCRYPTED MESSAGE", Bytes: cipherDER})
 	return cipherPEM
 }
@@ -91,14 +88,8 @@ func Decrypt(cipherPEM []byte, privkeyPEM []byte) string {
 
 	keyFileName := makeTempfile("ecca-key-", privkeyPEM)
 	defer os.Remove(keyFileName)
-
-	dec := exec.Command("openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", keyFileName)
-	dec.Stdin = bytes.NewReader(cipherBlock.Bytes)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	dec.Stdout = &stdout
-	dec.Stderr = &stderr
-	err := dec.Run()
+	err, stdout, stderr := run(bytes.NewReader(cipherBlock.Bytes),
+		"openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", keyFileName)
 	if err != nil {
 		return fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String())
 	}
@@ -107,21 +98,14 @@ func Decrypt(cipherPEM []byte, privkeyPEM []byte) string {
 }
 
 // Sign a message
-
 func Sign(privkeyPEM []byte, certPEM []byte, message string) string {
 	keyFileName := makeTempfile("ecca-key-", privkeyPEM)
 	defer os.Remove(keyFileName)
 
 	certFileName := makeTempfile("ecca-cert-", certPEM)
 	defer os.Remove(certFileName)
-
-	exc := exec.Command("openssl", "smime", "-sign", "-signer", certFileName,  "-inkey", keyFileName)
-	exc.Stdin = strings.NewReader(message)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exc.Stdout = &stdout
-	exc.Stderr = &stderr
-	err := exc.Run()
+	err, stdout, stderr := run(strings.NewReader(message), 
+		"openssl", "smime", "-sign", "-signer", certFileName,  "-inkey", keyFileName)
 	if err != nil {
 		return fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String())
 	}
@@ -133,16 +117,13 @@ func Sign(privkeyPEM []byte, certPEM []byte, message string) string {
 // Return a boolean wheter the message is signed by the signature.
 // TODO: verify the certificate.... (now just -noverify to just check the sha1. and trust the server for the sender information.
 // TODO: This we need to do with embedded encryption, not with openssl.
-func Verify(message string, signature string) (bool, string) {
+func Verify(message string, signature string, caPEM []byte) (bool, string) {
 	log.Printf("verifying\n")
+	caFilename := makeTempfile("ecca-ca-", caPEM)
+	defer os.Remove(caFilename)
 	// TODO: create template to merge message and signature in a valid openssl smime like format 
-	ver := exec.Command("openssl", "smime", "-verify", "-noverify")
-	ver.Stdin = strings.NewReader(signature) // TODO: change message for template 
- 	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	ver.Stdout = &stdout
-	ver.Stderr = &stderr
-	err := ver.Run()
+	err, stdout, stderr := run(strings.NewReader(signature), 
+		"openssl", "smime", "-verify", "-CAfile", caFilename)
 	if err != nil {
 		log.Printf("Error verifying message. Openssl says: %s\n", stderr.String())
 		return false, stderr.String() // return error message for now.
@@ -151,6 +132,21 @@ func Verify(message string, signature string) (bool, string) {
 	// TODO: return message == stdout.String(), plus "error message in case it is false"
 	return true, stdout.String() // or Bytes()
 }
+
+func run(stdin io.Reader, command string, args ... string) (error,bytes.Buffer, bytes.Buffer) {
+	runner := exec.Command(command, args...)
+	runner.Stdin = stdin
+ 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner.Stdout = &stdout
+	runner.Stderr = &stderr
+	err := runner.Run()
+	if err != nil {
+		log.Printf("Error with running command: %v\nerror is: %v\nstderr is: ", command, err, stderr.String())
+	}
+	return err, stdout, stderr
+}
+
 
 
 // make a tempfile with given data.
