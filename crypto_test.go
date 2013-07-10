@@ -30,7 +30,12 @@ var config = quick.Config {
 	Rand: MathRand.New(MathRand.NewSource(time.Now().UnixNano())),
 }
 
-var privPEM, certPEM = setup()
+// Generate a self signed CA cert & key.
+var  caCert, caKey, _ = generateCA("CA")
+var caCertPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})
+
+// generate client key and certificate
+var privPEM, certPEM = setup(caCert, caKey)
 
 func TestEncryptDecrypt(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
@@ -54,7 +59,7 @@ func TestSignVerify(t *testing.T) {
 		signature := Sign(privPEM, certPEM, message) 
 		t.Logf("message is: %s\nsignature is: %s\n", message, signature)
 		//log.Printf("message is %s\nsignature is %s\n", message, signature)
-		valid, res := Verify(message, signature)
+		valid, res := Verify(message, signature,  caCertPEM)
 		t.Logf("validity is: %v, res-message is: %q\n", valid, res)
 		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
 		return valid && (res == message)
@@ -91,10 +96,7 @@ func srand(size int) string {
 
 
 // Create certificate and private key to encrypt and decrypt messages
-func setup () ([]byte, []byte) {
-	// Generate a self signed CA cert & key.
-        caCert, caKey, err := generateCA("CA")
-        check(err)
+func setup (caCert *x509.Certificate, caKey *rsa.PrivateKey) ([]byte, []byte) {
 
 	// The private key to use 
 	// Notice make it at least 384 as 256 will not create a signature with openssl... 
@@ -167,6 +169,8 @@ func signCert(priv *rsa.PrivateKey, caCert *x509.Certificate, caKey *rsa.Private
 
                 SerialNumber:   serial,
                 SubjectKeyId:   keyId,
+		KeyUsage:        x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment |x509.KeyUsageKeyEncipherment | x509.KeyUsageDataEncipherment | x509.KeyUsageKeyAgreement ,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
                 AuthorityKeyId: caCert.AuthorityKeyId,
                 NotBefore:      time.Now().Add(-5 * time.Minute).UTC(),
                 NotAfter:       time.Now().Add(5 * time.Minute).UTC(),
