@@ -18,26 +18,27 @@ import (
 	"crypto/x509"
 	"crypto/tls"
 	MathRand   "math/rand"
+	"os"
 	"io/ioutil"
 	"bytes"
 	"encoding/xml"
 	"github.com/jteeuwen/go-pkg-xmlx"
 	// "dnssec"  // TODO fork dnssec.go into separate package
+	//"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
 // map between sitename and the url where to sign up for a certificate
 var registerURLmap = map[string]string{}
 
 var port = flag.Int("p", 8000, "port to listen to")
-var verbose = flag.Bool("v", false, "should every proxy request be logged to stdout")
-// For future use: see http://eccentric-authentication.org/
-//var registry = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1446/", "The Registry of (dis)honesty to query for duplicate certificates.")
+var verbose = flag.Bool("v", true, "should every proxy request be logged to stdout")
+//var registryUrl = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1024/", "The Registry of (dis)honesty to query for duplicate certificates.")
 
 func main() {
 	flag.Parse()
 	
 	proxy := goproxy.NewProxyHttpServer()
-	proxy.Verbose = true // *verbose
+	proxy.Verbose = *verbose
 	
 	// Requests for eccaHandlerHost allow the user to select and create certificates
 	// This handler sends a response
@@ -57,14 +58,14 @@ func main() {
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 	
-	// run or die. and try ipv6.
 	log.Printf("We are starting at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
 	log.Printf("Configure your browser to use one of those as http-proxy.\n")
 	log.Printf("Then browse to http://www.ecca.wtmnd.nl  or http://dating.wtmnd.nl:10443/\n")
 	log.Printf("Use http (not https) to benefit from this proxy.\n")
 	log.Printf("For assistence, please see: http://eccentric-authentication.org/contact.html\n")
-	go http.ListenAndServe(fmt.Sprintf("[::1]:%d", *port), proxy)
 
+	// run or die. Try ipv6 first
+	go http.ListenAndServe(fmt.Sprintf("[::1]:%d", *port), proxy)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), proxy))
 }
 
@@ -169,7 +170,8 @@ func signMessage(req  *http.Request)  (*http.Request, *http.Response) {
 	}
 	
 	//signature := "sig" + cleartext //
-	signature := Sign(creds.Priv, creds.Cert, cleartext)
+	signature, err := Sign(creds.Priv, creds.Cert, cleartext)
+	check(err)
 	req.Form.Set("signature", signature)   // add signature to the request
 
 	// TODO: refactor this duplicate code from encryptMessage
@@ -417,7 +419,20 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			//if verify == true {
 			blogtext := blogtextNode.Value // may return nil-pointer error
 			signature := signatureNode.Value
-			valid, message := Verify(blogtext, signature) // partial validation. 
+			//idPEM, err := FetchIdentity(signature)
+			//check(err)
+			//idCert := eccentric.PEMDecode(idPEM.Bytes())
+
+			// validate and fetch the FPCA certificate (openssl needs it too)
+			// TODO: get FPCA Cert Tree to Root CA validated by DNSSEC/DANE
+			//site, username, caCert, err := eccentric.ValidateEccentricCertificate(&idCert)
+			//check(err)
+			//chainPEM := eccentric.PEMEncode(caCert)
+
+			//log.Printf("Identity from message is %s, %s\n", site, username)
+			//log.Printf("CaCert for message is %s, %s\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
+			chainPEM := slurpFile("./Cryptoblog-chain.pem")
+			valid, message := Verify(blogtext, signature, []byte{}, chainPEM)
 			// TODO: verify certificate certificate chain
 			
 			blogtextNode.Value = message
@@ -452,3 +467,11 @@ func init() {
 	MathRand.Seed(time.Now().UnixNano())	
 }
 
+func slurpFile(filename string) []byte {
+        f, err := os.Open(filename)
+        check(err)
+        defer f.Close()
+        contents, err := ioutil.ReadAll(f)
+        check(err)
+        return contents
+}

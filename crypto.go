@@ -98,7 +98,12 @@ func Decrypt(cipherPEM []byte, privkeyPEM []byte) string {
 }
 
 // Sign a message
-func Sign(privkeyPEM []byte, certPEM []byte, message string) string {
+func Sign(privkeyPEM []byte, certPEM []byte, message string) (string, error) {
+	log.Printf("signing %v\n", message)
+	if len(message) == 0 {
+		return "", errors.New("Cannot sign empty message")
+	}
+
 	keyFileName := makeTempfile("ecca-key-", privkeyPEM)
 	defer os.Remove(keyFileName)
 
@@ -107,23 +112,24 @@ func Sign(privkeyPEM []byte, certPEM []byte, message string) string {
 	err, stdout, stderr := run(strings.NewReader(message), 
 		"openssl", "smime", "-sign", "-signer", certFileName,  "-inkey", keyFileName)
 	if err != nil {
-		return fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String())
+		return "", errors.New(fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String()))
 	}
 	signature := stdout.String()
-	return signature
+	return signature, nil
 }
 
 // Verify the message
-// Return a boolean wheter the message is signed by the signature.
-// TODO: verify the certificate.... (now just -noverify to just check the sha1. and trust the server for the sender information.
-// TODO: This we need to do with embedded encryption, not with openssl.
-func Verify(message string, signature string, caPEM []byte) (bool, string) {
+// Return a boolean whether the message is signed by the signature.
+func Verify(message string, signature string, idPEM []byte, caChainPEM []byte) (bool, string) {
 	log.Printf("verifying\n")
-	caFilename := makeTempfile("ecca-ca-", caPEM)
+	//idFilename := makeTempfile("ecca-id-", idPEM)
+	//defer os.Remove(idFilename)
+	caFilename := makeTempfile("ecca-ca-", caChainPEM)
 	defer os.Remove(caFilename)
 	// TODO: create template to merge message and signature in a valid openssl smime like format 
 	err, stdout, stderr := run(strings.NewReader(signature), 
-		"openssl", "smime", "-verify", "-CAfile", caFilename)
+		"openssl", "smime", "-verify",  "-CAfile", caFilename)
+//		"openssl", "smime", "-verify",  "-CAfile", "./Cryptoblog-chain.pem")
 	if err != nil {
 		log.Printf("Error verifying message. Openssl says: %s\n", stderr.String())
 		return false, stderr.String() // return error message for now.
@@ -133,7 +139,7 @@ func Verify(message string, signature string, caPEM []byte) (bool, string) {
 	return true, stdout.String() // or Bytes()
 }
 
-func run(stdin io.Reader, command string, args ... string) (error,bytes.Buffer, bytes.Buffer) {
+func run(stdin io.Reader, command string, args ... string) (error, bytes.Buffer, bytes.Buffer) {
 	runner := exec.Command(command, args...)
 	runner.Stdin = stdin
  	var stdout bytes.Buffer
@@ -142,12 +148,29 @@ func run(stdin io.Reader, command string, args ... string) (error,bytes.Buffer, 
 	runner.Stderr = &stderr
 	err := runner.Run()
 	if err != nil {
-		log.Printf("Error with running command: %v\nerror is: %v\nstderr is: ", command, err, stderr.String())
+		log.Printf("Error with running command: \"%v %v\"\nerror is: %v\nstderr is: %v\n", command, args, err, stderr.String())
 	}
 	return err, stdout, stderr
 }
 
-
+// Fetch the identity (users' client certificate) from the signed message.
+func FetchIdentity(signature string) (bytes.Buffer, error) {
+	// log.Printf("fetching identity\n")
+	err, pk7, stderr := run(strings.NewReader(signature), 
+		"openssl", "smime", "-pk7out")
+	if err != nil {
+		log.Fatal(stderr.String()) 
+		// this dies here.
+	}
+	// pipe the pk7 data to extract the user certificate
+	err, cert, stderr := run(bytes.NewReader(pk7.Bytes()),
+		"openssl", "pkcs7", "-print_certs")
+	if err != nil {
+		log.Fatal(stderr.String()) 
+		// this dies here too.
+	}
+	return cert, nil;
+}
 
 // make a tempfile with given data.
 // return the filename, caller needs to defer.os.Remove it.

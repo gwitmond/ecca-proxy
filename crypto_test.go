@@ -15,13 +15,16 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	//"bytes"
+	"bytes"
 	"encoding/pem"
 	"math/big"
 	CryptoRand "crypto/rand"
 	MathRand   "math/rand"
 	"time"
 	"errors"
+	//"github.com/gwitmond/eccentric-authentication" // package eccentric
+	"github.com/gwitmond/eccentric-authentication/fpca" // package eccentric/fpca	
+	"github.com/gwitmond/eccentric-authentication/utils/camaker" // CA maker tools.
 	//"log"
 )
 
@@ -31,15 +34,27 @@ var config = quick.Config {
 }
 
 // Generate a self signed CA cert & key.
-var  caCert, caKey, _ = generateCA("CA")
+var  caCert, caKey, _ = camaker.GenerateCA("The Root CA", "CA", 512)
 var caCertPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})
 
-// generate client key and certificate
-var privPEM, certPEM = setup(caCert, caKey)
+var fpcaCert, fpcaKey, _ = camaker.GenerateFPCA("The FPCA Org", "FPCA-CN", caCert, caKey, 512)
+var fpcaCertPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fpcaCert.Raw})
 
-func TestEncryptDecrypt(t *testing.T) {
+// create the chain certificate
+var buf = bytes.NewBuffer(caCertPEM)
+var n, _  =  buf.WriteString("\n")
+var m, _ =  buf.Write(fpcaCertPEM)
+var chainPEM = buf.Bytes()
+
+// generate client key and certificate with ROOT CA
+var privKey, clientCert = setupClient("test-client", caCert, caKey)
+var privPEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
+var  certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCert.Raw})
+
+// Test single level message encryption and decryption
+func TestEncryptDecryptRoot(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
-		t.Logf("message is %s\n", message)
+		//t.Logf("message is %s\n", message)
 		ciphertext := Encrypt(message, certPEM) 
 		res := Decrypt(ciphertext, privPEM)
 		return  res == message
@@ -50,17 +65,36 @@ func TestEncryptDecrypt(t *testing.T) {
 	}
 }
 
-func TestSignVerify(t *testing.T) {
-	//signVerify := func(dummy string ) bool {
-	signVerify := func(message string ) bool {
+// generate client key and certificate with FPCA CA
+var priv2Key, client2Cert = setupClient("test-client", fpcaCert, fpcaKey)
+var priv2PEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv2Key)})
+var  cert2PEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: client2Cert.Raw})
 
+// Test two level certificate for message encryption and decryption.
+// Should work as single level, as encryption is independent of certificate chain length.
+func TestEncryptDecryptFPCA(t *testing.T) {
+	encryptDecrypt := func(message string ) bool {
+		t.Logf("message is %s\n", message)
+		ciphertext := Encrypt(message, cert2PEM) 
+		res := Decrypt(ciphertext, priv2PEM)
+		return  res == message
+  	}
+	err := quick.Check(encryptDecrypt, &config)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+// Sign and verify single level certificate chain.
+// Test against caCert.
+func TestSignVerifyRoot(t *testing.T) {
+	signVerify := func(message string ) bool {
 		// ignore message and generate our own ascii string of same length.
-		// message := srand(len(message))
-		signature := Sign(privPEM, certPEM, message) 
-		t.Logf("message is: %s\nsignature is: %s\n", message, signature)
-		//log.Printf("message is %s\nsignature is %s\n", message, signature)
+		message = srand(len(message))
+		signature, _ := Sign(privPEM, certPEM, message) 
+		//t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
 		valid, res := Verify(message, signature,  caCertPEM)
-		t.Logf("validity is: %v, res-message is: %q\n", valid, res)
+		//t.Logf("validity is: %v, res is: %q\n", valid, res)
 		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
 		return valid && (res == message)
 	}
@@ -68,12 +102,54 @@ func TestSignVerify(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-
 }
+
+// sign and verify.
+// Needs the chain of CA-certificate to verify correctly.
+func TestSignVerifyFPCA(t *testing.T) {
+	signVerify := func(message string ) bool {
+		// ignore message and generate our own ascii string of same length.
+		message = srand(len(message))
+		signature, err := Sign(priv2PEM, cert2PEM, message) 
+		t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
+		valid, res := Verify(message, signature,  chainPEM)
+		t.Logf("validity is: %v, res is: %q\n", valid, res)
+		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
+		return valid && (res == message)
+	}
+	err := quick.Check(signVerify, &config)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+
+// test whether the signature contains the correct (and same) client certificate.
+func TestFetchIdentity(t *testing.T) {
+	testIdentity := func(CN string ) bool {
+		// create our own client certificates, use different names from the global ones.
+		prKey, clCert := setupClient(CN, caCert, caKey)
+		prPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(prKey)})
+		crtPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clCert.Raw})
+
+		message := "A simple test message"
+		signature, err := Sign(prPEM, crtPEM, message) 
+		t.Logf("message is: %s\nsignature is: %s, error is %v\n", message, signature, err)
+
+		id, err := FetchIdentity(signature)
+		check(err)
+		t.Logf("identity is: %v", id)
+		return bytes.Contains(id.Bytes(), crtPEM)
+	}
+	err := quick.Check(testIdentity, &config)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+
 var alpha = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-
-// generates a random string of fixed size
+// generates a random string of expected size
 func srand(size int) string {
     buf := make([]byte, size)
     for i := 0; i < size; i++ {
@@ -96,8 +172,7 @@ func srand(size int) string {
 
 
 // Create certificate and private key to encrypt and decrypt messages
-func setup (caCert *x509.Certificate, caKey *rsa.PrivateKey) ([]byte, []byte) {
-
+func setupClient(CN string, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*rsa.PrivateKey, *x509.Certificate) {
 	// The private key to use 
 	// Notice make it at least 384 as 256 will not create a signature with openssl... 
 	// It won't post an error either... :-(
@@ -105,77 +180,30 @@ func setup (caCert *x509.Certificate, caKey *rsa.PrivateKey) ([]byte, []byte) {
 	check(err)
 
 	// Sign it into a certificate
-	cert, err := signCert(privkey, caCert, caKey)
+	cert, err := signClientCert(CN, privkey, caCert, caKey)
 	check(err)
 
-	// encode
-	privPEM  := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privkey)})
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-
-	return privPEM, certPEM
+	return privkey, cert
 }
 
 
-func generateCA(serverName string) (*x509.Certificate, *rsa.PrivateKey, error) {
-        priv, err := rsa.GenerateKey(CryptoRand.Reader, 512)
-        if err != nil {
-                return nil, nil, err
-        }
-
-        serial := randBigInt()
-        keyId := randBytes()
-
-        template := x509.Certificate{
-                Subject: pkix.Name{
-                        CommonName: serverName,
-                },
-
-                SerialNumber:   serial,
-                SubjectKeyId:   keyId,
-                AuthorityKeyId: keyId,
-                NotBefore:      time.Now().Add(-5 * time.Minute).UTC(),
-                NotAfter:       time.Now().Add(5 * time.Minute).UTC(),
-
-                KeyUsage:              x509.KeyUsageCertSign,
-                BasicConstraintsValid: true,
-                IsCA:                  true,
-        }
-
-        derBytes, err := x509.CreateCertificate(CryptoRand.Reader, &template, &template, &priv.PublicKey, priv)
-        if err != nil {
-                return nil, nil, err
-        }
-
-        certs, err := x509.ParseCertificates(derBytes)
-        if err != nil {
-                return nil, nil, err
-        }
-
-        if len(certs) != 1 {
-                return nil, nil, errors.New("Failed to generate a parsable certificate")
-        }
-
-        return certs[0], priv, nil
-}
-
-func signCert(priv *rsa.PrivateKey, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*x509.Certificate, error) {
-        serial := randBigInt()
-        keyId := randBytes()
-
-        template := x509.Certificate{
-                Subject: pkix.Name{
-                        CommonName: "test",
-                },
-
-                SerialNumber:   serial,
-                SubjectKeyId:   keyId,
+func signClientCert(CN string, priv *rsa.PrivateKey, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*x509.Certificate, error) {
+	serial := randBigInt()
+	keyId := randBytes()
+	template := x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: CN,
+		},
+		
+		SerialNumber:   serial,
+		SubjectKeyId:   keyId,
 		KeyUsage:        x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment |x509.KeyUsageKeyEncipherment | x509.KeyUsageDataEncipherment | x509.KeyUsageKeyAgreement ,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
-                AuthorityKeyId: caCert.AuthorityKeyId,
-                NotBefore:      time.Now().Add(-5 * time.Minute).UTC(),
-                NotAfter:       time.Now().Add(5 * time.Minute).UTC(),
-        }
-
+		AuthorityKeyId: caCert.AuthorityKeyId,
+		NotBefore:      time.Now().Add(-5 * time.Minute).UTC(),
+		NotAfter:       time.Now().Add(5 * time.Minute).UTC(),
+	}
+	
         derBytes, err := x509.CreateCertificate(CryptoRand.Reader, &template, caCert, &priv.PublicKey, caKey)
         if err != nil {
                 return nil, err
@@ -207,5 +235,4 @@ func randBytes() (bytes []byte) {
         CryptoRand.Read(bytes)
         return
 }
-
 
