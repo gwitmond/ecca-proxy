@@ -413,19 +413,19 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		err := doc.LoadStream(resp.Body, nil)
 		check(err)
 
-		list := doc.SelectNodes("", "blog")
+		list := doc.SelectNodes("", "ecca_signed_message")
 		log.Printf("list is: %#v\n", list)
 		
 		for _, blog := range list {
-
 			log.Printf("Message is %#v\n", blog)
-			blogtextNode := blog.SelectNode("", "blog_text")
-			signatureNode  := blog.SelectNode("", "blog_signature")
-			validationNode := blog.SelectNode("", "blog_validation")
+			textNode := blog.SelectNode("", "ecca_text")
+			signatureNode  := blog.SelectNode("", "ecca_signature")
+			validationNode := blog.SelectNode("", "ecca_validation")
 			
 			//if verify == true {
-			blogtext := blogtextNode.Value // may return nil-pointer error
+			messageText := textNode.Value // may return nil-pointer error
 			signature := signatureNode.Value
+
 			//idPEM, err := FetchIdentity(signature)
 			//check(err)
 			//idCert := eccentric.PEMDecode(idPEM.Bytes())
@@ -439,10 +439,10 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			//log.Printf("Identity from message is %s, %s\n", site, username)
 			//log.Printf("CaCert for message is %s, %s\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
 			chainPEM := slurpFile("./Cryptoblog-chain.pem")
-			valid, message := Verify(blogtext, signature, chainPEM)
+			valid, message := Verify(messageText, signature, chainPEM)
 			// TODO: verify certificate certificate chain
 			
-			blogtextNode.Value = message
+			textNode.Value = message
 			signatureNode.Value = ""
 			validationNode.Value = fmt.Sprintf("Signature valid: %v", valid)
 				
