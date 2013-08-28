@@ -120,7 +120,7 @@ func Sign(privkeyPEM []byte, certPEM []byte, message string) (string, error) {
 
 // Verify the message
 // Return a boolean whether the message is signed by the signature.
-func Verify(message string, signature string, idPEM []byte, caChainPEM []byte) (bool, string) {
+func Verify(message string, signature string, caChainPEM []byte) (bool, string) {
 	log.Printf("verifying\n")
 	//idFilename := makeTempfile("ecca-id-", idPEM)
 	//defer os.Remove(idFilename)

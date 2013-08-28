@@ -40,6 +40,13 @@ var caCertPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert
 var fpcaCert, fpcaKey, _ = camaker.GenerateFPCA("The FPCA Org", "FPCA-CN", caCert, caKey, 512)
 var fpcaCertPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fpcaCert.Raw})
 
+
+var subca = &fpca.FPCA{
+	Namespace: "testca",
+	CaCert: fpcaCert,
+	CaPrivKey: fpcaKey,
+}
+
 // create the chain certificate
 var buf = bytes.NewBuffer(caCertPEM)
 var n, _  =  buf.WriteString("\n")
@@ -47,14 +54,16 @@ var m, _ =  buf.Write(fpcaCertPEM)
 var chainPEM = buf.Bytes()
 
 // generate client key and certificate with ROOT CA
-var privKey, clientCert = setupClient("test-client", caCert, caKey)
+//var privKey, clientCert = setupClient("test-client", caCert, caKey)
+var privKey, _ = rsa.GenerateKey(CryptoRand.Reader, 384)
+var clientCert, _ =  subca.SignClientCert("test-client", &privKey.PublicKey)
 var privPEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
-var  certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCert.Raw})
+var  certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCert})
 
 // Test single level message encryption and decryption
 func TestEncryptDecryptRoot(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
-		//t.Logf("message is %s\n", message)
+		t.Logf("message to encrypt-decrypt with Root is %s\n", message)
 		ciphertext := Encrypt(message, certPEM) 
 		res := Decrypt(ciphertext, privPEM)
 		return  res == message
@@ -74,7 +83,7 @@ var  cert2PEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: client
 // Should work as single level, as encryption is independent of certificate chain length.
 func TestEncryptDecryptFPCA(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
-		t.Logf("message is %s\n", message)
+		t.Logf("message to encrypt-decrypt with FPCA is %s\n", message)
 		ciphertext := Encrypt(message, cert2PEM) 
 		res := Decrypt(ciphertext, priv2PEM)
 		return  res == message
@@ -85,34 +94,16 @@ func TestEncryptDecryptFPCA(t *testing.T) {
 	}
 }
 
-// Sign and verify single level certificate chain.
-// Test against caCert.
-func TestSignVerifyRoot(t *testing.T) {
-	signVerify := func(message string ) bool {
-		// ignore message and generate our own ascii string of same length.
-		message = srand(len(message))
-		signature, _ := Sign(privPEM, certPEM, message) 
-		//t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
-		valid, res := Verify(message, signature,  caCertPEM)
-		//t.Logf("validity is: %v, res is: %q\n", valid, res)
-		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
-		return valid && (res == message)
-	}
-	err := quick.Check(signVerify, &config)
-	if err != nil {
-		t.Error(err)
-	}
-}
 
 // sign and verify.
-// Needs the chain of CA-certificate to verify correctly.
+// Sign with a client certificate. Verify against chain of RootCA and FPCA.
 func TestSignVerifyFPCA(t *testing.T) {
 	signVerify := func(message string ) bool {
 		// ignore message and generate our own ascii string of same length.
-		message = srand(len(message))
+		//message = srand(len(message))
 		signature, err := Sign(priv2PEM, cert2PEM, message) 
 		t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
-		valid, res := Verify(message, signature,  chainPEM)
+		valid, res := Verify(message, signature, chainPEM)
 		t.Logf("validity is: %v, res is: %q\n", valid, res)
 		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
 		return valid && (res == message)
@@ -151,11 +142,12 @@ func TestFetchIdentity(t *testing.T) {
 var alpha = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 // generates a random string of expected size
 func srand(size int) string {
-    buf := make([]byte, size)
-    for i := 0; i < size; i++ {
-        buf[i] = alpha[MathRand.Intn(len(alpha))]
-    }
-    return string(buf)
+	if size == 0 { size = 1 }
+	buf := make([]byte, size)
+	for i := 0; i < size; i++ {
+		buf[i] = alpha[MathRand.Intn(len(alpha))]
+	}
+	return string(buf)
 }
 
 //func (s string) Generate(rand *rand.Rand, size int) reflect.Value {

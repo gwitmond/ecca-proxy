@@ -97,7 +97,7 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 			return encryptMessage(req)
 		}
 		// Now see if we need to sign 
-		if req.Form.Get("sign") == "required" {
+		if req.Form.Get("sign") == "required" || req.Form.Get("sign") == "optional" {
 			return signMessage(req)
 		}
 		//TODO: handle singning and encrypting at one operation for secure messaging.
@@ -158,19 +158,24 @@ func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
 
 // signMessage signs a message with our current logged in account (private key) and adds the signature to the original request. Then it sends it on to the web site.
 func signMessage(req  *http.Request)  (*http.Request, *http.Response) {
-	cleartext := req.Form.Get("cleartext") // cleartext is the message, for now we ignore the title and other fields
+	cleartext := req.Form.Get("cleartext") 
+	// cleartext is the message, for now we ignore the title and other fields in theg signature
 	
 	// get the current logged in account (and private key)
+	log.Printf("req.URL.Host is: %v\n ", req.URL.Host)
 	creds := getLoggedInCreds(req.URL.Host)
+
 	if creds == nil {
 		log.Println("Form says to sign a message but no user is logged in. Configure server to require login before handing the form.\n")
 		return nil, goproxy.NewResponse(req,
 			goproxy.ContentTypeText, http.StatusInternalServerError,
 			"Server says to sign your message but you haven't logged in. Please log in first, then type your message again. Later we might cache your data and redirect you to the login-screen.")
 	}
+	log.Printf("creds are: %v\n", creds.CN)
 	
 	//signature := "sig" + cleartext //
 	signature, err := Sign(creds.Priv, creds.Cert, cleartext)
+	log.Printf("signature is: %#v\n", signature)
 	check(err)
 	req.Form.Set("signature", signature)   // add signature to the request
 
@@ -180,7 +185,9 @@ func signMessage(req  *http.Request)  (*http.Request, *http.Response) {
 		log.Println("error is ", err)
 		return nil, nil
 	}
-	
+	log.Printf("Client to send signed message to: %#v\n", client2)
+
+	log.Printf("POSTING Form to service: %#v\n", req.Form)
 	resp, err := client2.PostForm(req.URL.String(), req.Form)
 	if err != nil {
 		log.Println("error is ", err)
@@ -432,7 +439,7 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			//log.Printf("Identity from message is %s, %s\n", site, username)
 			//log.Printf("CaCert for message is %s, %s\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
 			chainPEM := slurpFile("./Cryptoblog-chain.pem")
-			valid, message := Verify(blogtext, signature, []byte{}, chainPEM)
+			valid, message := Verify(blogtext, signature, chainPEM)
 			// TODO: verify certificate certificate chain
 			
 			blogtextNode.Value = message
