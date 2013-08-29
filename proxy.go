@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"flag"
 	"net/http"
-	"net/url"
 	"time"
 	"crypto/x509"
 	"crypto/tls"
@@ -41,13 +40,13 @@ func main() {
 	proxy.Verbose = *verbose
 	
 	// Requests for eccaHandlerHost allow the user to select and create certificates
-	// This handler sends a response
+	// This handler sends a response to the client, never upstream.
 	proxy.OnRequest(goproxy.DstHostIs(eccaHandlerHost)).DoFunc(eccaHandler)
 	
 	// All other requests (where the user want to go to) are handled here.
-	// When this needs an account, it redirect to eccaHandler above.
+	// When this needs an account, it redirects the client to the eccaHandler above.
 	proxy.OnRequest().DoFunc(eccaProxy)
-	
+
 	
 	// Decode any messages when we have the "Eccentric-Authentication" header set to "decrypt"
 	proxy.OnResponse().DoFunc(DecodeMessages)
@@ -82,8 +81,9 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 	// the POST parameters and that eats the original buffer with the body
 	body, err := ioutil.ReadAll(req.Body)
 	check(err)
+	req.Body.Close() // close it before replacing. Prevents leaking file descriptors.
 	
-	// give it back immedeately.
+	// give the data back immedeately.
 	req.Body = ioutil.NopCloser(bytes.NewReader(body))
 	
 	// Read the parameters
@@ -98,7 +98,7 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 		}
 		// Now see if we need to sign 
 		if req.Form.Get("sign") == "required" || req.Form.Get("sign") == "optional" {
-			return signMessage(req)
+			return signMessage(req, ctx)
 		}
 		//TODO: handle singning and encrypting at one operation for secure messaging.
 	}
@@ -117,30 +117,16 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 
 // encrypt a message with a public key from a certificate in the url.	
 func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
+	// First, fetch the recipients public key from where the server tells us to expect it.
+	certPEM, err := fetchCertificatePEM( req.Form.Get("certificate_url"))
+	check(err)
+
+	// Do the actual encryption
 	cleartext := req.Form.Get("cleartext")
-	certificateURL := req.Form.Get("certificate_url")
-	
-	certURL, err := url.Parse(certificateURL)
-	if err != nil {
-		log.Println("error is ", err)
-		return nil, nil
-	}
-	
-	// encode query-parameters properly.
-	q := certURL.Query()
-	certURL.RawQuery = q.Encode()
-	log.Printf("certificateURL is: %v, RawQuery is %#v, RequestURI is %v\n", certificateURL, certURL.Query(), certURL.RequestURI())
-	
-	certHostname := getHostname(certURL.Host)
-	client, err := makeClient(certHostname)
-	if err != nil {
-		log.Println("error is ", err)
-		return nil, nil
-	}
-	
-	ciphertext := POSTencrypt(client, certURL.String(), cleartext)
+	ciphertext := Encrypt(cleartext, certPEM)
 	req.Form.Set("ciphertext", string(ciphertext))
 	
+	// TODO: refactor this duplicate code from signMessage
 	client2, err := makeClient(req.URL.Host)
 	if err != nil {
 		log.Println("error is ", err)
@@ -157,23 +143,31 @@ func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
 
 
 // signMessage signs a message with our current logged in account (private key) and adds the signature to the original request. Then it sends it on to the web site.
-func signMessage(req  *http.Request)  (*http.Request, *http.Response) {
+func signMessage(req  *http.Request, ctx *goproxy.ProxyCtx)  (*http.Request, *http.Response) {
 	cleartext := req.Form.Get("cleartext") 
 	// cleartext is the message, for now we ignore the title and other fields in theg signature
 	
 	// get the current logged in account (and private key)
+	// TODO: change to use the server certificate Root CA identity. Not the req.URL.Host.
 	log.Printf("req.URL.Host is: %v\n ", req.URL.Host)
 	creds := getLoggedInCreds(req.URL.Host)
-
+	
 	if creds == nil {
-		log.Println("Form says to sign a message but no user is logged in. Configure server to require login before handing the form.\n")
-		return nil, goproxy.NewResponse(req,
-			goproxy.ContentTypeText, http.StatusInternalServerError,
-			"Server says to sign your message but you haven't logged in. Please log in first, then type your message again. Later we might cache your data and redirect you to the login-screen.")
+		if req.Form.Get("sign") == "required" {
+			log.Println("Form says to sign a message but no user is logged in.\nConfigure server to require login before handing the form.\nHint: Use the ecca.LoggedInHandler.")
+			return nil, goproxy.NewResponse(req,
+				goproxy.ContentTypeText, http.StatusInternalServerError,
+				"Ecca Proxy error: Server says to sign your message but you haven't logged in. Please log in first, then type your message again. Later we might cache your data and redirect you to the login-screen.")
+		}
+
+		// creds is nil but signing is optional. Send the current form unchanged to the upstream server.
+		resp, err := fetchRequest(req, ctx)
+		check(err)
+		return nil, resp
 	}
+
 	log.Printf("creds are: %v\n", creds.CN)
 	
-	//signature := "sig" + cleartext //
 	signature, err := Sign(creds.Priv, creds.Cert, cleartext)
 	log.Printf("signature is: %#v\n", signature)
 	check(err)
@@ -280,6 +274,7 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 	// remember registerURL for the signup-phase
 	registerURLmap[req.Host] = auth["register"]
 
+	// redirect to Ecca-Proxy user agent (ourself) to log in or sign up 
 	resp = redirectToSelector(req)
 	return resp, nil
 }
@@ -426,26 +421,31 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			messageText := textNode.Value // may return nil-pointer error
 			signature := signatureNode.Value
 
-			//idPEM, err := FetchIdentity(signature)
-			//check(err)
-			//idCert := eccentric.PEMDecode(idPEM.Bytes())
-
-			// validate and fetch the FPCA certificate (openssl needs it too)
-			// TODO: get FPCA Cert Tree to Root CA validated by DNSSEC/DANE
-			//site, username, caCert, err := eccentric.ValidateEccentricCertificate(&idCert)
-			//check(err)
-			//chainPEM := eccentric.PEMEncode(caCert)
-
-			//log.Printf("Identity from message is %s, %s\n", site, username)
-			//log.Printf("CaCert for message is %s, %s\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
-			chainPEM := slurpFile("./Cryptoblog-chain.pem")
-			valid, message := Verify(messageText, signature, chainPEM)
-			// TODO: verify certificate certificate chain
-			
-			textNode.Value = message
-			signatureNode.Value = ""
-			validationNode.Value = fmt.Sprintf("Signature valid: %v", valid)
+			if len(signature) > 0 {
+				//idPEM, err := FetchIdentity(signature)
+				//check(err)
+				//idCert := eccentric.PEMDecode(idPEM.Bytes())
 				
+				// validate and fetch the FPCA certificate (openssl needs it too)
+				// TODO: get FPCA Cert Tree to Root CA validated by DNSSEC/DANE
+				//site, username, caCert, err := eccentric.ValidateEccentricCertificate(&idCert)
+				//check(err)
+				//chainPEM := eccentric.PEMEncode(caCert)
+				
+				//log.Printf("Identity from message is %s, %s\n", site, username)
+				//log.Printf("CaCert for message is %s, %s\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
+				chainPEM := slurpFile("./Cryptoblog-chain.pem")
+				valid, message := Verify(messageText, signature, chainPEM)
+				// TODO: verify certificate certificate chain
+			
+				textNode.Value = message
+				signatureNode.Value = ""
+				validationNode.Value = fmt.Sprintf("Signature valid: %v", valid)
+			} else {
+				// no signature.
+				validationNode.Value = fmt.Sprintf("No signature found: Don't trust this message")
+			}
+
 			// } else {
 			// 	// tell user how to get decoded output
 			// 	cleartextNode.Value = ""

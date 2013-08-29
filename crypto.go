@@ -10,7 +10,7 @@ package main // eccaproxy
 import (
 	"log"
 	"fmt"
-	"net/http"
+	"net/url"
 	"crypto/x509"
 	"io"
 	"io/ioutil"
@@ -22,13 +22,6 @@ import (
 	"strings"
 )
 
-// TODO: move this to proxy.go (or separate file)
-func POSTencrypt(client *http.Client, certificateUrl, cleartext string) []byte {
-	certPEM, err := fetchCertificatePEM(client, certificateUrl)
-	check(err)
-	cipherPEM := Encrypt(cleartext, certPEM)
-	return cipherPEM
-}
 
 // Encrypt a cleartext message with the public key in the certificate of the recipient using openssl
 func Encrypt(cleartext string, certPEM []byte) []byte {
@@ -44,15 +37,27 @@ func Encrypt(cleartext string, certPEM []byte) []byte {
 	return cipherPEM
 }
 
-// TODO: move it along with POSTencrypt.
+
 // fetchCertificate GETs the url and parses the page as a PEM encoded certificate.
-func fetchCertificatePEM(client* http.Client, url string) ([]byte, error) {
-	log.Printf("Fetching public key for %v\n", url)
-	resp, err := client.Get(url)
-	check(err)
+func fetchCertificatePEM(certificateURL string) ([]byte, error) {
+	certURL, err := url.Parse(certificateURL)
+	if err != nil { return nil, err }
+	
+	// encode query-parameters properly.
+	q := certURL.Query()
+	certURL.RawQuery = q.Encode()
+	log.Printf("certificateURL is: %v, RawQuery is %#v, RequestURI is %v\n", certificateURL, certURL.Query(), certURL.RequestURI())
+	
+	certHostname := getHostname(certURL.Host)
+	client, err := makeClient(certHostname)
+	if err != nil { return nil, err }
+
+	log.Printf("Fetching public key for %v\n", certificateURL)
+	resp, err := client.Get(certificateURL)
+	if err != nil { return nil, err }//	check(err)
 
 	body, err := ioutil.ReadAll(resp.Body)
-	check(err)
+	if err != nil { return nil, err }//	check(err)
 
 	log.Printf("Received: %q\n", body)
 
@@ -66,7 +71,7 @@ func fetchCertificatePEM(client* http.Client, url string) ([]byte, error) {
 
 	// parse der to validate the data...,
 	_, err = x509.ParseCertificate(pemBlock.Bytes)
-	check(err)
+	if err != nil { return nil, err } //check(err)
 
 	// but return the PEM so we can copy it to disk for /usr/bin/openssl
 	return body, nil
