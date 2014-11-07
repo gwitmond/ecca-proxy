@@ -21,8 +21,9 @@ import (
 	"io/ioutil"
 	"bytes"
 	"encoding/xml"
+	"html/template"
 	"github.com/jteeuwen/go-pkg-xmlx"
-	// "dnssec"  // TODO fork dnssec.go into separate package
+	"github.com/gwitmond/unbound"  
 	//"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
@@ -59,18 +60,36 @@ func main() {
 	
 	log.Printf("We are starting at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
 	log.Printf("Configure your browser to use one of those as http-proxy.\n")
-	log.Printf("Then browse to http://www.ecca.wtmnd.nl  or http://dating.wtmnd.nl:10443/\n")
+	log.Printf("Then browse to http://dating.wtmnd.nl:10443/\n")
 	log.Printf("Use http (not https) to benefit from this proxy.\n")
 	log.Printf("For assistence, please see: http://eccentric-authentication.org/contact.html\n")
 
+	server6 := &http.Server {
+		Addr: fmt.Sprintf("[::1]:%d", *port),
+		Handler: proxy,
+	}
+	// TODO: disable KeepAlives when your golang version supports it
+	//server6.SetKeepAlivesEnabled(false)
+
+	server4 := &http.Server {
+		Addr: fmt.Sprintf("127.0.0.1:%d", *port),
+		Handler: proxy,
+	}
+	// TODO: disable KeepAlives when your golang version supports it
+	//server4.SetKeepAlivesEnabled(false)
+
 	// run or die. Try ipv6 first
-	go http.ListenAndServe(fmt.Sprintf("[::1]:%d", *port), proxy)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), proxy))
+	go server6.ListenAndServe()
+	log.Fatal(server4.ListenAndServe())
 }
 
 // eccaProxy: proxy the user requests and authenticate with the credentials we know.
 func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	log.Println("\n\n\nRequest is ", req.Method, req.URL.String())
+	//log.Println("\n\n\nRequest is ", req.Method, req.URL.String())
+	ctx.Logf("Start-of-eccaProxy handler")
+	for _, c := range req.Cookies() {
+		ctx.Logf("Cookie send by the client is: %#v", c.Name)
+	}
 
 	// set the scheme to https so we connect upstream securely
 	if req.URL.Scheme == "http" {
@@ -100,18 +119,25 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 		if req.Form.Get("sign") == "required" || req.Form.Get("sign") == "optional" {
 			return signMessage(req, ctx)
 		}
-		//TODO: handle singning and encrypting at one operation for secure messaging.
+		//TODO: handle signing and encrypting at one operation for secure messaging.
 	}
-	resp, err := fetchRequest(req, ctx)
 
+	// Fetch the request from upstream
+	resp, err := fetchRequest(req, ctx)
 	if err != nil {
-		log.Println("There was an error fetching the users' request: ", err)
+		ctx.Warnf("There was an error fetching the users' request: ", err)
 		return req, goproxy.NewResponse(req,
 			goproxy.ContentTypeText, http.StatusInternalServerError,
 			"Some server error!")
 	}
 		
-	log.Printf("response is %#v\n", resp) 
+	ctx.Logf("response is %#v", resp) 
+	for _, c := range resp.Cookies() {
+		ctx.Logf("Cookie send by the server is: %#v\n", c.Name)
+	}
+	ctx.Logf("End-of-eccaProxy handler")
+	//log.Printf("Sleeping for 10 seconds...\n")
+	//time.Sleep(10 * time.Second)
 	return nil, resp // let goproxy send our response
 }
 
@@ -198,7 +224,10 @@ func makeCertConfig (servername string, caCert *x509.Certificate) (*http.Transpo
 	pool.AddCert(caCert)
 	tr := &http.Transport{ TLSClientConfig: &tls.Config{
 		RootCAs: pool,
-		ServerName: servername}}
+		ServerName: servername,
+		// TODO: enable DisableKeepAlives when your golang supports it.
+		//DisableKeepAlives: true,
+	}}
 	return tr
 }
 
@@ -213,7 +242,7 @@ func makeClient(host string) (*http.Client, error) {
 		caCert = serverCred.caCert
 	} else {
 		// Get and cache server certificate from DNSSEC/DANE.
-		caCert, err = GetCACert(getHostname(host))
+		caCert, err = unbound.Ctx.GetCACert(getHostname("_443._tcp." + host))
 		if err != nil { return nil, err }
 		setServerCreds(host, serverCert{
 			caCert: caCert,
@@ -243,12 +272,13 @@ func makeClient(host string) (*http.Client, error) {
 // adds client certificate to authenticate
 func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, error) {
 	// clean up the recycled header we got from the user
+	ctx.Logf("OldRequestURI is %s", req.RequestURI)
 	req.RequestURI="" 
 		
 	client, err := makeClient(req.URL.Host)
 	if err != nil { return nil, err }
 
-	log.Printf("Connecting to: %s", req.URL.String())
+	ctx.Logf("Connecting to: %s", req.URL.String())
 	resp, err := client.Do(req)
 	if err != nil { return nil, err }
 
@@ -258,7 +288,7 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 		// nope, we're done. Exit here.
 		return resp, nil
 	}
-	log.Printf("status code is 401\n")
+	ctx.Logf("status code is 401")
 	
 	// We have an 401-authorization failed 
 	// Test for a WWW-Authenticate: Ecca .... header.
@@ -269,12 +299,13 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 		log.Printf("No WWW-Authenticate: Ecca header, sending 401 response to client")
 		return resp, nil
 	}
-	log.Printf("WWW-Authenticate: Ecca header found: %#v\n", auth)
+	ctx.Logf("WWW-Authenticate: Ecca header found: %#v", auth)
 
 	// remember registerURL for the signup-phase
 	registerURLmap[req.Host] = auth["register"]
 
 	// redirect to Ecca-Proxy user agent (ourself) to log in or sign up 
+	resp.Body.Close()
 	resp = redirectToSelector(req)
 	return resp, nil
 }
@@ -336,6 +367,7 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		doc := xmlx.New()
 		err := doc.LoadStream(resp.Body, nil)
 		check(err)
+		resp.Body.Close();
 
 		list := doc.SelectNodes("", "ecca_message")
 		log.Printf("list is: %#v\n", list)
@@ -351,7 +383,8 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 				//ciphertext := message.S("", "ciphertext")
 				ciphertext := ciphertextNode.Value // may return nil-pointer error
 				cleartext := Decrypt([]byte(ciphertext), cred.Priv)
-				cleartextNode.Value = cleartext
+				cleartextNode.Value = template.HTMLEscapeString(cleartext)
+
 				
 				// take out the ciphertext
 				ciphertextNode.Value = "Here is the decoded message:"
@@ -407,6 +440,7 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		doc := xmlx.New()
 		err := doc.LoadStream(resp.Body, nil)
 		check(err)
+		resp.Body.Close()
 
 		list := doc.SelectNodes("", "ecca_signed_message")
 		log.Printf("list is: %#v\n", list)
@@ -438,7 +472,7 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 				valid, message := Verify(messageText, signature, chainPEM)
 				// TODO: verify certificate certificate chain
 			
-				textNode.Value = message
+				textNode.Value = template.HTMLEscapeString(message)
 				signatureNode.Value = ""
 				validationNode.Value = fmt.Sprintf("Signature valid: %v", valid)
 			} else {

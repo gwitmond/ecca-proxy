@@ -8,7 +8,7 @@
 package main // eccaproxy
 
 import (
-	"log"
+	//"log"
 	"bytes"
 	"crypto/tls"
 	"crypto/rsa"
@@ -30,15 +30,9 @@ var typeRE       = regexp.MustCompile(" type=\"([^\"]+)\"")
 var registerRE   = regexp.MustCompile(" register=\"([^\"]+)\"")
 
 func ParseWWWAuthHeader (header string) (map[string] string) {
-	log.Printf("header value is %s", header)
+	//log.Printf("header value is %s", header)
 
 	if eccaHeaderRE.MatchString(header) {
-		log.Printf("Header matches '^Ecca'")
-		//return eccaAuth{realm: getFirst(realmRE.FindStringSubmatch(header)),
-		//	typer: getFirst(typeRE.FindStringSubmatch(header)),
-		//	register: getFirst(registerRE.FindStringSubmatch(header)),
-		//}
-
 		values := make(map[string] string)
 	 	values["realm"]    = getFirst(realmRE.FindStringSubmatch(header))
 	 	values["type"]     = getFirst(typeRE.FindStringSubmatch(header))

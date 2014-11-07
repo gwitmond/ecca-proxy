@@ -29,7 +29,7 @@ import (
 )
 
 var config = quick.Config {
-	MaxCount: 10,
+	MaxCount: 1, // just one test
 	Rand: MathRand.New(MathRand.NewSource(time.Now().UnixNano())),
 }
 
@@ -63,7 +63,7 @@ var  certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientC
 // Test single level message encryption and decryption
 func TestEncryptDecryptRoot(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
-		t.Logf("message to encrypt-decrypt with Root is %s\n", message)
+		//t.Logf("message to encrypt-decrypt with Root is %s\n", message)
 		ciphertext := Encrypt(message, certPEM) 
 		res := Decrypt(ciphertext, privPEM)
 		return  res == message
@@ -83,7 +83,7 @@ var  cert2PEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: client
 // Should work as single level, as encryption is independent of certificate chain length.
 func TestEncryptDecryptFPCA(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
-		t.Logf("message to encrypt-decrypt with FPCA is %s\n", message)
+		//t.Logf("message to encrypt-decrypt with FPCA is %s\n", message)
 		ciphertext := Encrypt(message, cert2PEM) 
 		res := Decrypt(ciphertext, priv2PEM)
 		return  res == message
@@ -100,11 +100,11 @@ func TestEncryptDecryptFPCA(t *testing.T) {
 func TestSignVerifyFPCA(t *testing.T) {
 	signVerify := func(message string ) bool {
 		// ignore message and generate our own ascii string of same length.
-		//message = srand(len(message))
-		signature, err := Sign(priv2PEM, cert2PEM, message) 
-		t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
+		message = srand(len(message))
+		signature, _ := Sign(priv2PEM, cert2PEM, message) 
+		//t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
 		valid, res := Verify(message, signature, chainPEM)
-		t.Logf("validity is: %v, res is: %q\n", valid, res)
+		//t.Logf("validity is: %v, res is: %q\n", valid, res)
 		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
 		return valid && (res == message)
 	}
@@ -114,6 +114,13 @@ func TestSignVerifyFPCA(t *testing.T) {
 	}
 }
 
+func TestSignEmptyMessage(t *testing.T) {
+	message := "" //empty
+	signature, err := Sign(priv2PEM, cert2PEM, message) 
+	if err.Error() != "Cannot sign empty message" {
+		t.Errorf("Expected error 'Cannot sign empty message', got %#v, %#v\n", signature, err)
+	}
+}
 
 // test whether the signature contains the correct (and same) client certificate.
 func TestFetchIdentity(t *testing.T) {
@@ -125,11 +132,11 @@ func TestFetchIdentity(t *testing.T) {
 
 		message := "A simple test message"
 		signature, err := Sign(prPEM, crtPEM, message) 
-		t.Logf("message is: %s\nsignature is: %s, error is %v\n", message, signature, err)
+		//t.Logf("message is: %s\nsignature is: %s, error is %v\n", message, signature, err)
 
 		id, err := FetchIdentity(signature)
 		check(err)
-		t.Logf("identity is: %v", id)
+		//t.Logf("identity is: %v", id)
 		return bytes.Contains(id.Bytes(), crtPEM)
 	}
 	err := quick.Check(testIdentity, &config)
@@ -166,9 +173,9 @@ func srand(size int) string {
 // Create certificate and private key to encrypt and decrypt messages
 func setupClient(CN string, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*rsa.PrivateKey, *x509.Certificate) {
 	// The private key to use 
-	// Notice make it at least 384 as 256 will not create a signature with openssl... 
+	// Notice: make it at least 384 as 256 will not create a signature with openssl... 
 	// It won't post an error either... :-(
-	privkey, err := rsa.GenerateKey(CryptoRand.Reader, 384)
+	privkey, err := rsa.GenerateKey(CryptoRand.Reader, 512)
 	check(err)
 
 	// Sign it into a certificate
@@ -189,8 +196,15 @@ func signClientCert(CN string, priv *rsa.PrivateKey, caCert *x509.Certificate, c
 		
 		SerialNumber:   serial,
 		SubjectKeyId:   keyId,
-		KeyUsage:        x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment |x509.KeyUsageKeyEncipherment | x509.KeyUsageDataEncipherment | x509.KeyUsageKeyAgreement ,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
+		KeyUsage:   x509.KeyUsageDigitalSignature | 
+			x509.KeyUsageContentCommitment |
+			x509.KeyUsageKeyEncipherment | 
+			x509.KeyUsageDataEncipherment | 
+			x509.KeyUsageKeyAgreement ,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageClientAuth,
+			x509.ExtKeyUsageEmailProtection,
+		},
 		AuthorityKeyId: caCert.AuthorityKeyId,
 		NotBefore:      time.Now().Add(-5 * time.Minute).UTC(),
 		NotAfter:       time.Now().Add(5 * time.Minute).UTC(),

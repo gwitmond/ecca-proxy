@@ -104,7 +104,7 @@ func Decrypt(cipherPEM []byte, privkeyPEM []byte) string {
 
 // Sign a message
 func Sign(privkeyPEM []byte, certPEM []byte, message string) (string, error) {
-	log.Printf("signing %v\n", message)
+	// log.Printf("signing %v\n", message)
 	if len(message) == 0 {
 		return "", errors.New("Cannot sign empty message")
 	}
@@ -126,7 +126,7 @@ func Sign(privkeyPEM []byte, certPEM []byte, message string) (string, error) {
 // Verify the message
 // Return a boolean whether the message is signed by the signature.
 func Verify(message string, signature string, caChainPEM []byte) (bool, string) {
-	log.Printf("verifying\n")
+	// log.Printf("verifying\n")
 	//idFilename := makeTempfile("ecca-id-", idPEM)
 	//defer os.Remove(idFilename)
 	caFilename := makeTempfile("ecca-ca-", caChainPEM)
