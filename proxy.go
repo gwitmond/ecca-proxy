@@ -24,7 +24,7 @@ import (
 	"html/template"
 	"github.com/jteeuwen/go-pkg-xmlx"
 	"github.com/gwitmond/unbound"  
-	//"github.com/gwitmond/eccentric-authentication" // package eccentric
+	"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
 // map between sitename and the url where to sign up for a certificate
@@ -456,21 +456,26 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			signature := signatureNode.Value
 
 			if len(signature) > 0 {
-				//idPEM, err := FetchIdentity(signature)
-				//check(err)
-				//idCert := eccentric.PEMDecode(idPEM.Bytes())
+				idPEM, err := FetchIdentity(signature)
+				check(err)
+				idCert := eccentric.PEMDecode(idPEM.Bytes())
+				log.Printf("Identity from message is %s\n", idCert.Subject.CommonName)
 				
-				// validate and fetch the FPCA certificate (openssl needs it too)
-				// TODO: get FPCA Cert Tree to Root CA validated by DNSSEC/DANE
-				//site, username, caCert, err := eccentric.ValidateEccentricCertificate(&idCert)
-				//check(err)
-				//chainPEM := eccentric.PEMEncode(caCert)
-				
-				//log.Printf("Identity from message is %s, %s\n", site, username)
-				//log.Printf("CaCert for message is %s, %s\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
-				chainPEM := slurpFile("./Cryptoblog-chain.pem")
-				valid, message := Verify(messageText, signature, chainPEM)
-				// TODO: verify certificate certificate chain
+				// get our rootCert from the connection credentials
+				host := ctx.Req.URL.Host
+				serverCred, haveIt := getServerCreds(host)
+				if haveIt == false {
+					// We should have it as we are connected to the server via TLS
+					panic("We don't have serverCreds that we expect.")
+				}
+				rootCert := serverCred.caCert
+
+				// Fetch the chain (and validate that our idCert is a valid Eccentric cert)
+				chain, err := eccentric.ValidateEccentricCertificateChain(&idCert, rootCert)
+				check(err)
+
+				// Let OpenSSL validate the message signature and return the signed message
+				valid, message := Verify(messageText, signature, chain)
 			
 				textNode.Value = template.HTMLEscapeString(message)
 				signatureNode.Value = ""

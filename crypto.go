@@ -125,16 +125,20 @@ func Sign(privkeyPEM []byte, certPEM []byte, message string) (string, error) {
 
 // Verify the message
 // Return a boolean whether the message is signed by the signature.
-func Verify(message string, signature string, caChainPEM []byte) (bool, string) {
-	// log.Printf("verifying\n")
-	//idFilename := makeTempfile("ecca-id-", idPEM)
-	//defer os.Remove(idFilename)
-	caFilename := makeTempfile("ecca-ca-", caChainPEM)
+// Return the message to show on screen, can't trust the server.
+func Verify(message string, signature string, caChain []x509.Certificate) (bool, string) {
+	caFile, err := ioutil.TempFile("", "ecca-ca-")
+	check(err)
+	caFilename := caFile.Name()
 	defer os.Remove(caFilename)
+	for _, cert := range caChain {
+		pem.Encode(caFile, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	}
+	caFile.Close()
+
 	// TODO: create template to merge message and signature in a valid openssl smime like format 
 	err, stdout, stderr := run(strings.NewReader(signature), 
 		"openssl", "smime", "-verify",  "-CAfile", caFilename)
-//		"openssl", "smime", "-verify",  "-CAfile", "./Cryptoblog-chain.pem")
 	if err != nil {
 		log.Printf("Error verifying message. Openssl says: %s\n", stderr.String())
 		return false, stderr.String() // return error message for now.
@@ -187,4 +191,3 @@ func makeTempfile(prefix string, data []byte) string {
 	tempFile.Close()
 	return tempFileName
 }
-
