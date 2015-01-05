@@ -51,7 +51,7 @@ var subca = &fpca.FPCA{
 var buf = bytes.NewBuffer(caCertPEM)
 var n, _  =  buf.WriteString("\n")
 var m, _ =  buf.Write(fpcaCertPEM)
-var chainPEM = buf.Bytes()
+var chain = []x509.Certificate{*fpcaCert, *caCert}
 
 // generate client key and certificate with ROOT CA
 //var privKey, clientCert = setupClient("test-client", caCert, caKey)
@@ -103,7 +103,7 @@ func TestSignVerifyFPCA(t *testing.T) {
 		message = srand(len(message))
 		signature, _ := Sign(priv2PEM, cert2PEM, message) 
 		//t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
-		valid, res := Verify(message, signature, chainPEM)
+		valid, res := Verify(message, signature, chain)
 		//t.Logf("validity is: %v, res is: %q\n", valid, res)
 		// this tests whether openssl returns someting and whether that is equal to the original message that was signed.
 		return valid && (res == message)
