@@ -22,7 +22,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"html/template"
-	"github.com/jteeuwen/go-pkg-xmlx"
+	"github.com/gwitmond/go-pkg-xmlx"
 	"github.com/gwitmond/unbound"  
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
@@ -125,7 +125,7 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 	// Fetch the request from upstream
 	resp, err := fetchRequest(req, ctx)
 	if err != nil {
-		ctx.Warnf("There was an error fetching the users' request: ", err)
+		ctx.Warnf("There was an error fetching the users' request: %v", err)
 		return req, goproxy.NewResponse(req,
 			goproxy.ContentTypeText, http.StatusInternalServerError,
 			"Some server error!")
@@ -370,27 +370,23 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		resp.Body.Close();
 
 		list := doc.SelectNodes("", "ecca_message")
-		log.Printf("list is: %#v\n", list)
-		
+		// log.Printf("list is: %#v\n", list)
 		for _, message := range list {
-
-			log.Printf("Message is %#v\n", message)
+			// log.Printf("Message is %#v\n", message)
 			ciphertextNode := message.SelectNode("", "ciphertext")
 			cleartextNode  := message.SelectNode("", "cleartext")
 			
 			if decode == true {
 				// replace cleartext with decrypted ciphertext
-				//ciphertext := message.S("", "ciphertext")
-				ciphertext := ciphertextNode.Value // may return nil-pointer error
+				ciphertext := ciphertextNode.GetValue()
 				cleartext := Decrypt([]byte(ciphertext), cred.Priv)
-				cleartextNode.Value = template.HTMLEscapeString(cleartext)
+				cleartextNode.SetValue(template.HTMLEscapeString(cleartext))
 
-				
 				// take out the ciphertext
-				ciphertextNode.Value = "Here is the decoded message:"
+				ciphertextNode.SetValue("Here is the decoded message:")
 			} else {
 				// tell user how to get decoded output
-				cleartextNode.Value = ""
+				cleartextNode.SetValue("")
 
 				// make the xml-node
 				node := xmlx.NewNode(xmlx.NT_ELEMENT)
@@ -443,17 +439,28 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		resp.Body.Close()
 
 		list := doc.SelectNodes("", "ecca_signed_message")
-		log.Printf("list is: %#v\n", list)
+		// log.Printf("list is: %#v\n", list)
 		
 		for _, blog := range list {
-			log.Printf("Message is %#v\n", blog)
+			// log.Printf("Message is %#v\n", blog)
+			// log.Printf("Children are: ")
+			// for _, child := range blog.Children {
+			//	log.Printf("\t%#v\n", child.Name)
+			// }
 			textNode := blog.SelectNode("", "ecca_text")
 			signatureNode  := blog.SelectNode("", "ecca_signature")
 			validationNode := blog.SelectNode("", "ecca_validation")
-			
+			// log.Printf("textNode is %#v\b", textNode)
+			// log.Printf("Children are: ")
+			// for _, child := range textNode.Children {
+			//	log.Printf("\t%#v\n", child)
+			// }
+
 			//if verify == true {
-			messageText := textNode.Value // may return nil-pointer error
-			signature := signatureNode.Value
+			messageText := textNode.GetValue()
+			signature := signatureNode.GetValue()
+			// log.Printf("message is %#v\n", messageText)
+			// log.Printf("signature is %#v\n", signature)
 
 			if len(signature) > 0 {
 				idPEM, err := FetchIdentity(signature)
@@ -477,17 +484,17 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 				// Let OpenSSL validate the message signature and return the signed message
 				valid, message := Verify(messageText, signature, chain)
 			
-				textNode.Value = template.HTMLEscapeString(message)
-				signatureNode.Value = ""
-				validationNode.Value = fmt.Sprintf("Signature valid: %v", valid)
+				textNode.SetValue(template.HTMLEscapeString(message))
+				signatureNode.SetValue("")
+				validationNode.SetValue(fmt.Sprintf("Signature valid: %v", valid))
 			} else {
 				// no signature.
-				validationNode.Value = fmt.Sprintf("No signature found: Don't trust this message")
+				validationNode.SetValue(fmt.Sprintf("No signature found: Don't trust this message"))
 			}
 
 			// } else {
 			// 	// tell user how to get decoded output
-			// 	cleartextNode.Value = ""
+			// 	cleartextNode.SetValue("")
 
 			// 	// make the xml-node
 			// 	node := xmlx.NewNode(xmlx.NT_ELEMENT)
