@@ -490,6 +490,23 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			} else {
 				// no signature.
 				validationNode.SetValue(fmt.Sprintf("No signature found: Don't trust this message"))
+
+				// Disable all XML-elements with an ecca_id_ref that matches the ecca_id of the signed message
+				// This is to disable the send-private-message buttons.
+				id := blog.As("*", "ecca_id")
+				if id != "" {
+					refs := doc.SelectNodesNameAttr("*", "*", "ecca_id_ref")
+					for _, ref := range refs {
+						idAttr := ref.SelectAttr("*", "ecca_id_ref")
+						if idAttr.Value == id {
+							classAttr := ref.SelectAttr("*", "class")
+							if classAttr != nil {
+								ref.SetAttr("class", classAttr.Value + " ecca_disabled")
+							}
+							ref.RemoveAttr("href")
+						}
+					}
+				}
 			}
 
 			// } else {
