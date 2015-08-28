@@ -60,7 +60,10 @@ func main() {
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 
-	log.Printf("We are starting at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
+	log.Printf("Starting listeners")
+	connectListeners()
+
+	log.Printf("Starting proxy access at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
 	log.Printf("Configure your browser to use one of those as http-proxy.\n")
 	log.Printf("Then browse to http://dating.wtmnd.nl:10443/\n")
 	log.Printf("Use http (not https) to benefit from this proxy.\n")
@@ -250,17 +253,24 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		// TODO: Check it for unicity/MitM at the registry-of-honesty.eccentric-authentication.org
 		// TODO: Store the results for later
 
-		// Create listening socket /onion hidden service
+		// Create listening socket /onion hidden service and get is endpoint address
 		// TODO: setup certificate and client filtering.
-		listener, err := net.Listen("tcp", "[::1]:0")
+		l, err := net.Listen("tcp", "[::1]:0")
 		check(err)
-		log.Printf("Listening at %s.", listener.Addr())
-		go AwaitIncomingConnection(listener)
+
+		// Store listening address in database to listen again at restart of the proxy.
+		// I.E. make these listening endpoints permanent.
+		setListener(listener {
+			Destination: l.Addr().String(),
+		})
+
+		log.Printf("Listening at %s.", l.Addr())
+		go AwaitIncomingConnection(l)
 
 		// Send signed, encrypted invitation
 		// For now, message must be: eccadirect://host:port/
 		// with host either ipv4, ipv6 or a hostname (.onion/.i2p allowed)
-		message := fmt.Sprintf("eccadirect://%s/", listener.Addr())
+		message := fmt.Sprintf("eccadirect://%s/", l.Addr())
 		ciphertext := SignAndEncryptPEM(creds.Priv, creds.Cert, recipCertPEM, message)
 		//log.Printf("ciphertext is: %v", string(ciphertext[:80]) + "....")
 		req.Form.Set("ciphertext", string(ciphertext))
@@ -540,7 +550,7 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 	node.AddChild(submit)
 
 	return node
-} 
+}
 
 
 var directConnectionTemplate = template.Must(template.New("directConnection").Parse(
@@ -606,7 +616,6 @@ func VerifyMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 
 			if len(signature) > 0 {
 				idCert := FetchIdentity(signature)
-				//idCert := eccentric.PEMDecode(idPEM)
 				log.Printf("Identity from message is %s\n", idCert.Subject.CommonName)
 
 				// get our rootCert from the connection credentials

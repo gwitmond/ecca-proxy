@@ -28,7 +28,7 @@ func init() {
         check(err)
         dbmap = &gorp.DbMap{Db: db, Dialect: gorp.SqliteDialect{}}
         dbmap.AddTableWithName(credentials{}, "credentials")  // .SetKeys(false, "CN", "Realm")
-	
+	dbmap.AddTableWithName(listener{}, "listeners")
         dbmap.CreateTables() // if not exists
         
         dbmap.TraceOn("[gorp]", log.New(os.Stdout, "myapp:", log.Lmicroseconds)) 
@@ -93,6 +93,28 @@ func getCredentials(args... interface{}) ([]credentials, error) {
 	var res = make([]credentials, len(creds))
 	for i, e := range creds {
 		res[i] = *e.(*credentials)
+	}
+	return res, nil
+}
+
+// Listeners
+
+// Add a listener endpoint
+func setListener(list listener) {
+	check(dbmap.Insert(&list))
+}
+
+// Just get all listeners
+func getAllListeners () ([]listener, error) {
+	query := "SELECT * FROM listeners"
+
+        listeners, err := dbmap.Select(listener{}, query)
+        if err != nil { return nil, err }
+
+	// ugly boilerplate. Can this be done better?
+	var res = make([]listener, len(listeners))
+	for i, e := range listeners {
+		res[i] = *e.(*listener)
 	}
 	return res, nil
 }
