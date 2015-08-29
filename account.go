@@ -10,6 +10,8 @@ package main // eccaproxy
 import (
 	"log"
 	"crypto/x509"
+	"crypto/rand"
+	"encoding/base64"
 )
 
 // This file contains the users' accounts for Ecca. 
@@ -49,7 +51,7 @@ type credentials struct {
 	Priv     []byte          // the private key that matches the certificate.
 }
 
-
+//-------------------- Logins
 // logins tells which credentials to use for each host (one cred per host)
 // logins["www.foo.corp"] = credentials{cn: "anonymous-fawkes", ...}
 // we forget all logins when the proxy terminates.
@@ -74,7 +76,39 @@ func logout(hostname string) {
 }
 
 
+//--------------------- Invitations
+// Invitations use a Token to prevent web pages from writing fake invitations.
+// Only properly encrypted and signed messages may introduce an invitation.
+// That's how we are sure about the identity of the sender.
+// And how we authenticate the inviter.
 
+// Store map in memory. Create new tokens at next run.
+var invitations = make(map[string] string)
+
+// storeInvitation creates a token and stores the given endpoint at that address. Returns the token.
+func storeInvitation(endpoint string) string {
+	token := makeToken()
+	invitations[token] = endpoint
+	return token
+}
+
+// makeToken makes a 32 byte random value and encodes it into a string
+func makeToken() string {
+	buf := make([]byte, 32)
+	_, err := rand.Read(buf)
+	check(err)
+	token := base64.StdEncoding.EncodeToString(buf)
+	return token
+}
+
+// getInvitation retrieves an invitation for a token, or nil.
+func getInvitation(token string) string {
+	endpoint, exists := invitations[token]
+	if exists == false { return "" }
+	return endpoint
+}
+
+//--------------------- Utils
 // Poor mans assert()
 func check (err error) {
 	if err != nil {

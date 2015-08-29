@@ -388,8 +388,12 @@ func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 			log.Fatal("Missing connectionID")
 		}
 		log.Printf("handleDirectConnection has connectionID: %s", connectionID)
-		// TODO: lookup ipport based on connectionID token
-		ipport := connectionID
+
+		// lookup ipport based on connectionID token
+		ipport := getInvitation(connectionID)
+		if ipport == "" {
+			log.Fatal("Wrong connectionID")
+		}
 		response := dialDirectConnection(ipport)
 
 		return nil, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusOK, response)

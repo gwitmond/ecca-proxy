@@ -518,40 +518,38 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 		return nil
 	}
 	ipport := found[1] // the submatch with the ip:port value
-	// TODO: parse the URL
-	// Save the connection details in a table under a random id
+	// TODO: parse and validate the URL
+
+	// Save the connection details in a table under a random token
+	token := storeInvitation(ipport)
+
 	// Create a form to dial that id.
+	form := makeNode("form", map[string]string{
+		"method": "POST",
+		"action": "http://ecca.handler" + eccaDialDirectConnectionPath})
+	connID := makeNode("input", map[string]string{
+		"type": "hidden",
+		"name": "connectionID",
+		"value": token})
+	submit := makeNode("input", map[string]string{
+		"type": "submit",
+		"value": "Connect me to " + senderCert.Subject.CommonName})
+	form.AddChild(connID)
+	from.AddChild(submit)
 
-	// buf  := execTemplate(directConnectionTemplate, "directConnection", map[string]interface{}{
-	// 	"connectionID": ipport,
-	// 	"remoteParty": senderCert.Subject.CommonName,
-	// })
-	// button := buf.String()
-	// log.Printf("button: %s", button)
-	// return button //buf.String()
-
-	node := xmlx.NewNode(xmlx.NT_ELEMENT)
-	node.Name = xml.Name{"", "form"}
-	node.Attributes = append(node.Attributes,
-		&xmlx.Attr{xml.Name{"", "method"}, "POST"},
-		&xmlx.Attr{xml.Name{"", "action"}, "http://ecca.handler" + eccaDialDirectConnectionPath})
-	connID := xmlx.NewNode(xmlx.NT_ELEMENT)
-	connID.Name = xml.Name{"", "input"}
-	connID.Attributes = append(connID.Attributes,
-		&xmlx.Attr{xml.Name{"", "type"}, "hidden"},
-		&xmlx.Attr{xml.Name{"", "name"}, "connectionID"},
-		&xmlx.Attr{xml.Name{"", "value"}, ipport})
-	submit := xmlx.NewNode(xmlx.NT_ELEMENT)
-	submit.Name = xml.Name{"", "input"}
-	submit.Attributes = append(submit.Attributes,
-		&xmlx.Attr{xml.Name{"", "type"}, "submit"},
-		&xmlx.Attr{xml.Name{"", "value"}, "Connect me to " + senderCert.Subject.CommonName})
-	node.AddChild(connID)
-	node.AddChild(submit)
-
-	return node
+	return form
 }
 
+// makeNode makes an xmlx.Node with the given attributes
+func makeNode(name string, attrs map[string]string) *xmlx.Node {
+	node := xmlx.NewNode(xmlx.NT_ELEMENT)
+	node.Name = xml.Name{"", name}
+	for key, value := range attrs {
+		node.Attributes = append(node.Attributes,
+			&xmlx.Attr{xml.Name{"", key}, value})
+	}
+	return node
+}
 
 var directConnectionTemplate = template.Must(template.New("directConnection").Parse(
 `<form action="/ecca.handler/connect-direct" method="POST">
