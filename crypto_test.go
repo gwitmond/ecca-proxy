@@ -23,8 +23,8 @@ import (
 	"time"
 	"errors"
 	//"github.com/gwitmond/eccentric-authentication" // package eccentric
-	"github.com/gwitmond/eccentric-authentication/fpca" // package eccentric/fpca	
-	"github.com/gwitmond/eccentric-authentication/utils/camaker" // CA maker tools.
+	"github.com/gwitmond/eccentric-authentication/fpca" // package eccentric/fpca
+	"github.com/gwitmond/eccentric-authentication/camaker" // CA maker tools.
 	//"log"
 )
 
@@ -64,7 +64,7 @@ var  certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientC
 func TestEncryptDecryptRoot(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
 		//t.Logf("message to encrypt-decrypt with Root is %s\n", message)
-		ciphertext := Encrypt(message, certPEM) 
+		ciphertext := Encrypt(message, certPEM)
 		res := Decrypt(ciphertext, privPEM)
 		return  res == message
   	}
@@ -84,7 +84,7 @@ var  cert2PEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: client
 func TestEncryptDecryptFPCA(t *testing.T) {
 	encryptDecrypt := func(message string ) bool {
 		//t.Logf("message to encrypt-decrypt with FPCA is %s\n", message)
-		ciphertext := Encrypt(message, cert2PEM) 
+		ciphertext := Encrypt(message, cert2PEM)
 		res := Decrypt(ciphertext, priv2PEM)
 		return  res == message
   	}
@@ -101,7 +101,7 @@ func TestSignVerifyFPCA(t *testing.T) {
 	signVerify := func(message string ) bool {
 		// ignore message and generate our own ascii string of same length.
 		message = srand(len(message))
-		signature, _ := Sign(priv2PEM, cert2PEM, message) 
+		signature, _ := Sign(priv2PEM, cert2PEM, message)
 		//t.Logf("message is: %s\nsignature is: %s\nerror is: %v", message, signature, err)
 		valid, res := Verify(message, signature, chain)
 		//t.Logf("validity is: %v, res is: %q\n", valid, res)
@@ -116,7 +116,7 @@ func TestSignVerifyFPCA(t *testing.T) {
 
 func TestSignEmptyMessage(t *testing.T) {
 	message := "" //empty
-	signature, err := Sign(priv2PEM, cert2PEM, message) 
+	signature, err := Sign(priv2PEM, cert2PEM, message)
 	if err.Error() != "Cannot sign empty message" {
 		t.Errorf("Expected error 'Cannot sign empty message', got %#v, %#v\n", signature, err)
 	}
@@ -131,13 +131,14 @@ func TestFetchIdentity(t *testing.T) {
 		crtPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clCert.Raw})
 
 		message := "A simple test message"
-		signature, err := Sign(prPEM, crtPEM, message) 
-		//t.Logf("message is: %s\nsignature is: %s, error is %v\n", message, signature, err)
-
-		id, err := FetchIdentity(signature)
+		signature, err := Sign(prPEM, crtPEM, message)
+		t.Logf("message is: %s\nsignature is: %s, error is %v\n", message, signature, err)
 		check(err)
-		//t.Logf("identity is: %v", id)
-		return bytes.Contains(id.Bytes(), crtPEM)
+
+		id := FetchIdentity(signature)
+		t.Logf("got identity is: %#v", id.Raw)
+		t.Logf("expected is: %#v", clCert.Raw)
+		return bytes.Equal(id.Raw, clCert.Raw)
 	}
 	err := quick.Check(testIdentity, &config)
 	if err != nil {
@@ -166,14 +167,14 @@ func srand(size int) string {
 
 // Initialise math.rand seed. Otherwise it behaves as math.seed(1). ouch..
 //func init() {
-//	MathRand.Seed(time.Now().UnixNano())	
+//	MathRand.Seed(time.Now().UnixNano())
 //}
 
 
 // Create certificate and private key to encrypt and decrypt messages
 func setupClient(CN string, caCert *x509.Certificate, caKey *rsa.PrivateKey) (*rsa.PrivateKey, *x509.Certificate) {
-	// The private key to use 
-	// Notice: make it at least 384 as 256 will not create a signature with openssl... 
+	// The private key to use
+	// Notice: make it at least 384 as 256 will not create a signature with openssl...
 	// It won't post an error either... :-(
 	privkey, err := rsa.GenerateKey(CryptoRand.Reader, 512)
 	check(err)
@@ -193,13 +194,13 @@ func signClientCert(CN string, priv *rsa.PrivateKey, caCert *x509.Certificate, c
 		Subject: pkix.Name{
 			CommonName: CN,
 		},
-		
+
 		SerialNumber:   serial,
 		SubjectKeyId:   keyId,
-		KeyUsage:   x509.KeyUsageDigitalSignature | 
+		KeyUsage:   x509.KeyUsageDigitalSignature |
 			x509.KeyUsageContentCommitment |
-			x509.KeyUsageKeyEncipherment | 
-			x509.KeyUsageDataEncipherment | 
+			x509.KeyUsageKeyEncipherment |
+			x509.KeyUsageDataEncipherment |
 			x509.KeyUsageKeyAgreement ,
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageClientAuth,
@@ -209,7 +210,7 @@ func signClientCert(CN string, priv *rsa.PrivateKey, caCert *x509.Certificate, c
 		NotBefore:      time.Now().Add(-5 * time.Minute).UTC(),
 		NotAfter:       time.Now().Add(5 * time.Minute).UTC(),
 	}
-	
+
         derBytes, err := x509.CreateCertificate(CryptoRand.Reader, &template, caCert, &priv.PublicKey, caKey)
         if err != nil {
                 return nil, err
