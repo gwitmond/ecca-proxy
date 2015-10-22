@@ -13,14 +13,17 @@ import (
 	"fmt"
 	"errors"
 	"bytes"
+	"net"
 	"net/http"
 	"net/url"
+	"io"
 	"io/ioutil"
 	"html/template"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"os/exec"
 	"strconv"
 	"regexp"
 	CryptoRand "crypto/rand"
@@ -196,6 +199,16 @@ func getHostname(host string) (string) {
 	return hostname
 }
 
+// Strip the hostname and return the port from the hostname:port or IP-address:port
+var portnrRE = regexp.MustCompile(":([0-9]+)$")
+
+func getPort(address string) (string) {
+	port := getFirst(portnrRE.FindStringSubmatch(address))
+	if port == "" {
+		panic("no port number in " + address)
+	}
+	return port
+}
 
 // Register the named accountname at the sites' CA. Uses a new private key.
 func registerCN(hostname string, cn string) (*credentials, error) {
@@ -412,7 +425,7 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	pool := x509.NewCertPool()
 	pool.AddCert(fpca)
 
-	log.Printf("calling: %v at %v", clientConfig.ServerName, invitation.Endpoint)
+	log.Printf("calling: %v at %v", invitation.ListenerCN, invitation.Endpoint)
 	clientConfig := tls.Config{
 		ServerName: invitation.ListenerCN,
 		Certificates: []tls.Certificate{ourCert},
@@ -421,19 +434,43 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	conn , err := tls.Dial("tcp", invitation.Endpoint, &clientConfig)
 	check(err)
 
-	// test the encrypted channel
-	message := []byte("Hallo daar")
-	_, err = conn.Write(message)
+	go startPayload(conn)
+	return "Started Simple Chat app."
+}
+
+// Start the simple chat app on the encrypted channel.
+func startPayload(tlsconn *tls.Conn){
+	// Create listener socket for the simple chat
+	socket, err := net.Listen("tcp", "[::1]:0")
+	check (err)
+	port := getPort(socket.Addr().String())
+
+	// start the chat app and point it to our socket
+	cmd := exec.Command("uxterm", "-e", "nc", "-6", "::1", port)
+
+	err = cmd.Start() // start asynchronously
 	check(err)
 
-	buf := make([]byte, 1024)
-	m, err := conn.Read(buf)
+	// wait for it to connect
+	app, err := socket.Accept()
 	check(err)
 
-	log.Printf("received: %s", string(buf[:m]))
+	// show a welcome message
+	app.Write([]byte("Connected, chat away!\n---------------------\n"))
 
-	conn.Close()
-	return string(buf[:m])
+	// copy the TLS-connection to the chat app and back
+	go io.Copy(app, tlsconn)
+	go io.Copy(tlsconn, app)
+
+	// wait for it to finish
+	err = cmd.Wait()
+	check(err)
+
+	// Close all, including the socket and the TLS channel.
+	// We run this only once.
+	app.Close()
+	socket.Close()
+	tlsconn.Close()
 }
 
 // var handleInitiateDirectConnectionTemplate = template.Must(template.New("initiateDirectConnection").Parse(

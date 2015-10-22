@@ -152,21 +152,7 @@ func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN st
 	}
 
 	// Now we have established an authenticated connection to the EXPECTED party.
-	// Hand the socket to the user
-	// return tlsconn
-
-	// Echo all incoming data in small chunks.
-	buf := make([]byte, 8)
-	n, err := tlsconn.Read(buf)
-	for ;; {
-		if err != nil { break; }
-
-		log.Printf("Echoing: %v [%v]", n, string(buf[:n]))
-		_, err = tlsconn.Write(buf[:n])
-		check(err)
-
-		// loop
-		n, err = tlsconn.Read(buf)
-	}
-	tlsconn.Close()
+	// Hand the socket to the user app
+	startPayload(tlsconn)
+	return
 }
