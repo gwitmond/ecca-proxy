@@ -28,7 +28,7 @@ import (
 func Encrypt(cleartext string, certPEM []byte) []byte {
 	certFileName := makeTempfile("ecca-cert", certPEM)
 	defer os.Remove(certFileName)
-	err, stdout, _ := run(strings.NewReader(cleartext), 
+	err, stdout, _ := run(strings.NewReader(cleartext),
 		"openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", certFileName)
 	if err != nil {
 		log.Fatal(err)
@@ -60,7 +60,7 @@ func fetchCertificatePEM(certificateURL string) ([]byte, error) {
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil { return nil, err }//	check(err)
 
-	log.Printf("Received: %q\n", body)
+	//log.Printf("Received: %q\n", body)
 
 	// decode pem...,
 	pemBlock, _ := pem.Decode(body)
@@ -71,9 +71,9 @@ func fetchCertificatePEM(certificateURL string) ([]byte, error) {
 	}
 
 	// parse der to validate the data...,
-	_, err = x509.ParseCertificate(pemBlock.Bytes)
+	cert, err := x509.ParseCertificate(pemBlock.Bytes)
 	if err != nil { return nil, err } //check(err)
-
+	log.Printf("Fetched cert for %v", cert.Subject.CommonName)
 	// but return the PEM so we can copy it to disk for /usr/bin/openssl
 	return body, nil
 }
@@ -234,7 +234,7 @@ if len(message) == 0 {
 	err, encrStdout, encrStderr := run(bytes.NewReader(signature),
 		"openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", recipCertFileName)
 	if err != nil {
-		log.Fatal(errors.New(fmt.Sprintf("Error encrypting message. Error: %v\nOpenssl says: %s\n", err, encrStderr.String())))	
+		log.Fatal(errors.New(fmt.Sprintf("Error encrypting message. Error: %v\nOpenssl says: %s\n", err, encrStderr.String())))
 	log.Fatal(err)
 	}
 	cipherDER := encrStdout.Bytes()

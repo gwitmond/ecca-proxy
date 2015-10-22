@@ -10,10 +10,8 @@ package main // eccaproxy
 // This file contains the data storage bits
 
 import (
-	"log"
 	"fmt"
-	"os"
-		
+
 	// These are for the data storage
         "github.com/coopernurse/gorp"
         "database/sql"
@@ -30,8 +28,8 @@ func init() {
         dbmap.AddTableWithName(credentials{}, "credentials")  // .SetKeys(false, "CN", "Realm")
 	dbmap.AddTableWithName(listener{}, "listeners")
         dbmap.CreateTables() // if not exists
-        
-        dbmap.TraceOn("[gorp]", log.New(os.Stdout, "myapp:", log.Lmicroseconds)) 
+
+        //dbmap.TraceOn("[gorp]", log.New(os.Stdout, "myapp:", log.Lmicroseconds))
 }
 
 
@@ -76,16 +74,16 @@ func getCredentials(args... interface{}) ([]credentials, error) {
         switch {
         case len(args) == 0:
                 query = "SELECT * FROM credentials"
-                
+
         case len(args) == 1:
                 query = "SELECT * FROM credentials WHERE hostname = ?"
-                
+
         case len(args) == 2:
                 query = "SELECT * FROM credentials WHERE hostname = ? AND cn = ?"
         }
 
 	query += " ORDER BY hostname, cn"
- 
+
         creds, err := dbmap.Select(credentials{}, query, args...)
         if err != nil { return nil, err }
 
@@ -99,21 +97,20 @@ func getCredentials(args... interface{}) ([]credentials, error) {
 
 // Listeners
 
-// Add a listener endpoint
-func setListener(list listener) {
-	check(dbmap.Insert(&list))
+func storeListener(listener listener) {
+	check(dbmap.Insert(&listener))
 }
 
 // Just get all listeners
 func getAllListeners () ([]listener, error) {
 	query := "SELECT * FROM listeners"
 
-        listeners, err := dbmap.Select(listener{}, query)
+        dbls, err := dbmap.Select(listener{}, query)
         if err != nil { return nil, err }
 
 	// ugly boilerplate. Can this be done better?
-	var res = make([]listener, len(listeners))
-	for i, e := range listeners {
+	var res = make([]listener, len(dbls))
+	for i, e := range dbls {
 		res[i] = *e.(*listener)
 	}
 	return res, nil

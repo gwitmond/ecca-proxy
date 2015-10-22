@@ -21,9 +21,10 @@ import (
 	"os"
 	"io/ioutil"
 	"bytes"
+	"encoding/gob"
 	"encoding/xml"
+	"encoding/base64"
 	"html/template"
-	"regexp"
 	"github.com/gwitmond/go-pkg-xmlx"
 	"github.com/gwitmond/unbound"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
@@ -60,8 +61,7 @@ func main() {
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 
-	log.Printf("Starting listeners")
-	connectListeners()
+	startAllListeners()
 
 	log.Printf("Starting proxy access at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
 	log.Printf("Configure your browser to use one of those as http-proxy.\n")
@@ -223,6 +223,17 @@ func signMessage(req  *http.Request, ctx *goproxy.ProxyCtx)  (*http.Request, *ht
 }
 
 
+type DCInvitation struct {
+	InviteeCN       string   // who is invited to connect
+	Endpoint        string   // where to connect to: ip:port, xyz.onion, etc
+	ListenerCN      string   // expect listener to identify with this CN (tls: server name)
+	ListenerFPCAPEM []byte   // signed by this CA.
+}
+
+func init() {
+	gob.Register(DCInvitation{})
+}
+
 func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response) {
 	switch req.Method {
 	case "POST":
@@ -230,51 +241,65 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		// TODO: get these from the site
 		log.Printf("req.URL.Host is: %v\n ", req.URL.Host)
 
-		creds := getLoggedInCreds(req.URL.Host)
-		if creds == nil {
+		ourCreds := getLoggedInCreds(req.URL.Host)
+		if ourCreds == nil {
 			log.Println("Site says to initiate a direct connection but you are not logged in.\nConfigure server to require login before handing the form.\nHint: Use the ecca.LoggedInHandler.")
 			return nil, goproxy.NewResponse(req,
 				goproxy.ContentTypeText, http.StatusInternalServerError,
 				"Ecca Proxy error: Site says to initiate a direct connection but you haven't logged in. Please log in first, then try again.")
 		}
-		log.Printf("creds are: %v\n", creds.CN)
+		log.Printf("our creds are: %v\n", ourCreds.CN)
 
-		//cn := req.FormValue("cn")
-		//addressee := req.FormValue("addressee")
-		//username, hostname, err := eccentric.ParseCN(addressee)
-		//check(err)
+		ourCert, err := eccentric.ParseCertByteA(ourCreds.Cert)
+		check(err)
+
+		// get the one who signed our cert.
+		ourFPCACert, err := eccentric.FetchCN(ourCert.Issuer.CommonName)
+		check(err)
 
 		// Fetch certificate of addressee
 		// First, fetch the recipients public key from where the server tells us to expect it.
 		recipCertURL := req.Form.Get("certificate_url")
 		recipCertPEM, err := fetchCertificatePEM(recipCertURL)
 		check(err)
+		recipCert, err := eccentric.ParseCertByteA(recipCertPEM)
+		check(err)
 
 		// TODO: Check it for unicity/MitM at the registry-of-honesty.eccentric-authentication.org
 		// TODO: Store the results for later
 
 		// Create listening socket /onion hidden service and get is endpoint address
-		// TODO: setup certificate and client filtering.
-		l, err := net.Listen("tcp", "[::1]:0")
+		l, err := net.Listen("tcp", "127.0.0.1:0")
 		check(err)
+		endpoint := l.Addr().String()
+		l.Close() // close now and reopen in startListener
 
+		// Create listener for this recipient
+		listener := createListener(endpoint, ourCreds, recipCert)
 		// Store listening address in database to listen again at restart of the proxy.
 		// I.E. make these listening endpoints permanent.
-		setListener(listener {
-			Destination: l.Addr().String(),
-		})
+		storeListener(listener)
 
-		log.Printf("Listening at %s.", l.Addr())
-		go AwaitIncomingConnection(l)
+		// start listener in the background, awaiting connections
+		startListener(listener)
 
-		// Send signed, encrypted invitation
-		// For now, message must be: eccadirect://host:port/
-		// with host either ipv4, ipv6 or a hostname (.onion/.i2p allowed)
-		message := fmt.Sprintf("eccadirect://%s/", l.Addr())
-		ciphertext := SignAndEncryptPEM(creds.Priv, creds.Cert, recipCertPEM, message)
-		//log.Printf("ciphertext is: %v", string(ciphertext[:80]) + "....")
+		hostname := getHostname(ourCreds.Hostname)
+		invitation := DCInvitation{
+			InviteeCN: recipCert.Subject.CommonName,
+			Endpoint: endpoint,
+			ListenerCN: ourCreds.CN + "@@" + hostname,
+			ListenerFPCAPEM: eccentric.PEMEncode(ourFPCACert),
+		}
+		log.Printf("Make invitation from %v, at %v to %v", invitation.ListenerCN, invitation.Endpoint, invitation.InviteeCN)
+
+		var message bytes.Buffer
+		encoder := gob.NewEncoder(&message)
+		err = encoder.Encode(invitation)
+		check(err)
+		mess_64 := base64.StdEncoding.EncodeToString(message.Bytes())
+
+		ciphertext := SignAndEncryptPEM(ourCreds.Priv, ourCreds.Cert, recipCertPEM, mess_64)
 		req.Form.Set("ciphertext", string(ciphertext))
-
 		// Send the invitation to site for delivery to the recipient
 		// TODO: refactor this duplicate code from encryptMessage
 		client2, err := makeClient(req.URL.Host)
@@ -282,9 +307,8 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 			log.Println("error is ", err)
 			return nil, nil
 		}
-		//log.Printf("Client to send invitation to: %#v\n", client2)
+		log.Printf("Client to send invitation to: %#v\n", client2)
 
-		//log.Printf("POSTING Form to service: %#v\n", req.Form)
 		resp, err := client2.PostForm(req.URL.String(), req.Form)
 		if err != nil {
 			log.Println("error is ", err)
@@ -428,6 +452,7 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		println("DecodeMessages response handler has header: ", resp.Header.Get("Eccentric-Authentication"))
 		// get whether the user wants to decode the encrypted messages
 		decode := ctx.Req.Form.Get("decode") == "true"
+		// decode = true // peg at true to always decode messages. it's easier at testing.
 
 		// create the link that allows him to set that request
 		decodeURL := ctx.Req.URL
@@ -502,28 +527,23 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 	return resp
 }
 
-// findInvitationRE matches the invitation syntax
-var findInvitationRE = regexp.MustCompile("^eccadirect://([^/]*)/$")
-
-// findDirectConnectionInvitation checks the received cleartext for an invitation string.
+// findDirectConnectionInvitation checks the received cleartext for a valid invitation.
 // It will be replaced by a form with a button to create the connection
-// Returns either the button for an invitation, or nil.
+// Returns either the button for an invitation, or nil to signal the original cleartext to be shown
 func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certificate) *xmlx.Node {
-	// for now, the whole message must be the url.
-	log.Printf("cleartext is [%#v]", cleartext)
+	// for now, the whole message must be the base64 gob encoded DCInvitation
+	log.Printf("cleartext is [%#v]", cleartext[:50])
 
-	found := findInvitationRE.FindStringSubmatch(cleartext)
-	if found == nil {
-		// No eccadirect URL, we're done.
-		return nil
-	}
-	ipport := found[1] // the submatch with the ip:port value
-	// TODO: parse and validate the URL
+	// See if we can decode it into a invitation-struct
+	invitation, err := parseInvitation(cleartext)
+	check(err)
+	log.Printf("Received Invitation from: %v, at %v, to %v", invitation.ListenerCN, invitation.Endpoint, invitation.InviteeCN)
 
-	// Save the connection details in a table under a random token
-	token := storeInvitation(ipport)
+	// Save the invitation in a table under a random token
+	// to prevent sites from creating dial-buttons themselves.
+	token := storeInvitation(invitation)
 
-	// Create a form to dial that id.
+	// Create a form to dial that token.
 	form := makeNode("form", map[string]string{
 		"method": "POST",
 		"action": "http://ecca.handler" + eccaDialDirectConnectionPath})
@@ -535,9 +555,26 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 		"type": "submit",
 		"value": "Connect me to " + senderCert.Subject.CommonName})
 	form.AddChild(connID)
-	from.AddChild(submit)
+	form.AddChild(submit)
 
 	return form
+}
+
+// parseInvitation takes a base64 encoded string and check if it can be parsed an DCInvitation
+func parseInvitation(cleartext string) (*DCInvitation, error) {
+	message, err := base64.StdEncoding.DecodeString(cleartext)
+	if err != nil {
+		// not base64 encoded, it's probably a text message
+		return nil, nil
+	}
+
+	decoder := gob.NewDecoder(bytes.NewReader(message))
+	var invitation DCInvitation
+	err = decoder.Decode(&invitation)
+	check(err) // die on err as we don't have other base64 encoded messages.
+	// we can't show the binary data after base64 decoding either.
+
+	return &invitation, nil
 }
 
 // makeNode makes an xmlx.Node with the given attributes

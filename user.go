@@ -13,18 +13,19 @@ import (
 	"fmt"
 	"errors"
 	"bytes"
-	"net"
 	"net/http"
 	"net/url"
 	"io/ioutil"
 	"html/template"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"strconv"
 	"regexp"
 	CryptoRand "crypto/rand"
 	MathRand   "math/rand"
+	"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
 // Global config
@@ -188,7 +189,11 @@ func registerAnonymous(hostname string) (*credentials, error) {
 var hostnameRE = regexp.MustCompile("^([^:]+)")
 
 func getHostname(host string) (string) {
-	return getFirst(hostnameRE.FindStringSubmatch(host))
+	hostname := getFirst(hostnameRE.FindStringSubmatch(host))
+	if hostname == "" {
+		panic("no hostname in " + host)
+	}
+	return hostname
 }
 
 
@@ -351,35 +356,8 @@ func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Re
 }
 
 
-// Await Incoming connection on the given net.Listener.
-func AwaitIncomingConnection(listener net.Listener) {
-	for {
-		log.Printf("Awaiting connections on %v", listener.Addr())
-		conn, err := listener.Accept()
-		check(err)
-		go answerIncomingConnection(conn)
-	}
-}
-
-// answerIncomingConnection recieves the connection request from the invitee.
-// TODO: mutually authenticate
-func answerIncomingConnection(conn net.Conn) {
-	log.Printf("Receive connection from %v", conn.RemoteAddr())
-	// TODO: reject unwanted callers, only the whitelisted aliens can connect
-	// Startup chat app.
-	// Await end
-	buf := make([]byte, 1024)
-	_, err := conn.Read(buf)
-	check(err)
-	_, err = conn.Write(buf)
-	check(err)
-
-	conn.Write([]byte(`Goodbye and thanks for all the fish`))
-	conn.Close()
-}
-
-
 func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	// see who we're gonna call
 	req.ParseForm()
 	switch req.Method {
 	case "POST":
@@ -389,28 +367,61 @@ func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 		}
 		log.Printf("handleDirectConnection has connectionID: %s", connectionID)
 
-		// lookup ipport based on connectionID token
-		ipport := getInvitation(connectionID)
-		if ipport == "" {
+		invitation := getInvitation(connectionID)
+		if invitation == nil {
 			log.Fatal("Wrong connectionID")
 		}
-		response := dialDirectConnection(ipport)
 
+		//log.Printf("invitation is: %#v", invitation)
+
+		inviteeName, inviteeHost, err := eccentric.ParseCN(invitation.InviteeCN)
+		check(err)
+		log.Printf("invitee is: %v, %v", inviteeName, inviteeHost)
+
+		// fetch our own identity
+		ourCreds := getLoggedInCreds(inviteeHost)
+		if ourCreds == nil {
+			// should not happen, as we need to be logged in to get the dial-button, but anyway
+			log.Println("Site says to dial a direct connection but you are not logged in.")
+			return nil, goproxy.NewResponse(req,
+				goproxy.ContentTypeText, http.StatusInternalServerError,
+				"Ecca Proxy error: Site says to dial a direct connection but you haven't logged in. Please log in first, then try again.")
+		}
+
+		log.Printf("our creds are: %v\n", ourCreds.CN)
+		ourCert, err := tls.X509KeyPair(ourCreds.Cert, ourCreds.Priv)
+		check(err)
+		//log.Printf("ourCert is: %#v", ourCert)
+
+		// call out and show the response
+		response := dialDirectConnection(invitation, ourCert)
 		return nil, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusOK, response)
 	}
 
 	log.Fatal("Unexpected method: ", req.Method)
-
 	return nil, nil
 }
 
 
 // dial the direct connection and start a conversation
-func dialDirectConnection(ipport string) string {
-	log.Printf("Dialing: %s", ipport)
-	conn, err := net.Dial("tcp", ipport)
+func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) string {
+	fpca, err := eccentric.ParseCertByteA(invitation.ListenerFPCAPEM)
+	check(err)
+	log.Printf("FPCA is %v", fpca.Subject.CommonName)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(fpca)
+
+	log.Printf("calling: %v at %v", clientConfig.ServerName, invitation.Endpoint)
+	clientConfig := tls.Config{
+		ServerName: invitation.ListenerCN,
+		Certificates: []tls.Certificate{ourCert},
+		RootCAs: pool,
+	}
+	conn , err := tls.Dial("tcp", invitation.Endpoint, &clientConfig)
 	check(err)
 
+	// test the encrypted channel
 	message := []byte("Hallo daar")
 	_, err = conn.Write(message)
 	check(err)
@@ -422,7 +433,7 @@ func dialDirectConnection(ipport string) string {
 	log.Printf("received: %s", string(buf[:m]))
 
 	conn.Close()
-	return string(buf)
+	return string(buf[:m])
 }
 
 // var handleInitiateDirectConnectionTemplate = template.Must(template.New("initiateDirectConnection").Parse(

@@ -14,7 +14,7 @@ import (
 	"encoding/base64"
 )
 
-// This file contains the users' accounts for Ecca. 
+// This file contains the users' accounts for Ecca.
 // This is what we use to determine with what certificate to log in at a certain site.
 
 // key the accounts on the hostname of the site.
@@ -57,21 +57,27 @@ type credentials struct {
 // we forget all logins when the proxy terminates.
 var logins = make(map[string] credentials)
 
-// return the credentials that's currently logged in at hostname 
-func getLoggedInCreds (hostname string) (*credentials) {
+// return the credentials that's currently logged in at hostname
+func getLoggedInCreds (host string) (*credentials) {
+	hostname := getHostname(host)
 	cred, exists := logins[hostname]
-	if exists == false { return nil } // User is not logged in. 
+	if exists == false { return nil } // User is not logged in.
 	return &cred
 }
 
+
 // Set the active account for each host we are connected to.
 // From this moment, every connection to <hostname> will be identified by the cert for <cn>
-func login(hostname string, cred credentials) {
+// Limit host to just the hostname, not the host:port
+// So there is only one user logged in at any hostname at a time.
+func login(host string, cred credentials) {
+	hostname := getHostname(host)
 	logins[hostname] = cred
 	log.Println("logging in ", cred.CN, " at ", hostname)
 }
 
-func logout(hostname string) {
+func logout(host string) {
+	hostname := getHostname(host)
 	delete(logins, hostname)
 }
 
@@ -83,12 +89,12 @@ func logout(hostname string) {
 // And how we authenticate the inviter.
 
 // Store map in memory. Create new tokens at next run.
-var invitations = make(map[string] string)
+var invitations = make(map[string] DCInvitation)
 
-// storeInvitation creates a token and stores the given endpoint at that address. Returns the token.
-func storeInvitation(endpoint string) string {
+// storeInvitation creates a token and stores the invitation. Returns the token.
+func storeInvitation(invitation *DCInvitation) string {
 	token := makeToken()
-	invitations[token] = endpoint
+	invitations[token] = *invitation
 	return token
 }
 
@@ -102,10 +108,10 @@ func makeToken() string {
 }
 
 // getInvitation retrieves an invitation for a token, or nil.
-func getInvitation(token string) string {
-	endpoint, exists := invitations[token]
-	if exists == false { return "" }
-	return endpoint
+func getInvitation(token string) *DCInvitation {
+	invitation, exists := invitations[token]
+	if exists == false { return nil }
+	return &invitation
 }
 
 //--------------------- Utils
