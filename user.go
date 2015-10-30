@@ -29,6 +29,7 @@ import (
 	CryptoRand "crypto/rand"
 	MathRand   "math/rand"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
+	"github.com/gwitmond/socks4a"
 )
 
 // Global config
@@ -431,10 +432,24 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 		Certificates: []tls.Certificate{ourCert},
 		RootCAs: pool,
 	}
-	conn , err := tls.Dial("tcp", invitation.Endpoint, &clientConfig)
+	// direct ip endpoint
+	//conn , err := tls.Dial("tcp", invitation.Endpoint, &clientConfig)
+	//check(err)
+
+	// Connect to the onion endpoint
+	socks := &socks4a.Socks4a {
+		Network: "tcp",
+		Address: "127.0.0.1:9050",
+	}
+	conn, err := socks.Dial(invitation.Endpoint)
 	check(err)
 
-	go startPayload(conn)
+	// start TLS over the onion connection
+	tlsconn := tls.Client(conn, &clientConfig)
+	err = tlsconn.Handshake()
+	check(err)
+
+	go startPayload(tlsconn)
 	return "Started Simple Chat app."
 }
 

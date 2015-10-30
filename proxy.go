@@ -12,7 +12,6 @@ import (
 	"log"
 	"fmt"
 	"flag"
-	"net"
 	"net/http"
 	"time"
 	"crypto/x509"
@@ -61,7 +60,7 @@ func main() {
 	// Change the redirect location (from https) to http so the client gets back to us.
 	proxy.OnResponse().DoFunc(ChangeToHttp)
 
-	startAllListeners()
+	restartAllTorListeners()
 
 	log.Printf("Starting proxy access at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
 	log.Printf("Configure your browser to use one of those as http-proxy.\n")
@@ -268,25 +267,16 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		// TODO: Check it for unicity/MitM at the registry-of-honesty.eccentric-authentication.org
 		// TODO: Store the results for later
 
-		// Create listening socket /onion hidden service and get is endpoint address
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		check(err)
-		endpoint := l.Addr().String()
-		l.Close() // close now and reopen in startListener
-
-		// Create listener for this recipient
-		listener := createListener(endpoint, ourCreds, recipCert)
+		// Create (and start) a Tor-Listener for this recipient
+		listener := createTorListener(ourCreds, recipCert)
 		// Store listening address in database to listen again at restart of the proxy.
 		// I.E. make these listening endpoints permanent.
 		storeListener(listener)
 
-		// start listener in the background, awaiting connections
-		startListener(listener)
-
 		hostname := getHostname(ourCreds.Hostname)
 		invitation := DCInvitation{
 			InviteeCN: recipCert.Subject.CommonName,
-			Endpoint: endpoint,
+			Endpoint: listener.OnionAddress,
 			ListenerCN: ourCreds.CN + "@@" + hostname,
 			ListenerFPCAPEM: eccentric.PEMEncode(ourFPCACert),
 		}

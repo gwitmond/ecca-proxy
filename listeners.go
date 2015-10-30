@@ -10,40 +10,75 @@
 package main // eccaproxy
 
 import (
+	"fmt"
 	"net"
 	"log"
 	"crypto/tls"
 	"crypto/x509"
+	"github.com/gwitmond/goControlTor"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
 
+// type ipListener struct {
+// 	Endpoint string                  // ip:port
+// 	ListenerCN string                // our CN (server name)
+// 	ListenerTLSCertPEM []byte        // the cert we provide to the callers/clients
+// 	ListenerTLSPrivKeyPEM []byte     // and the private key
+
+// 	CallerCN string                   // the caller's CN we expect
+// 	CallerCertPEM  []byte             // the caller's certificate  (superfluous)
+// 	CallerFPCACertPEM []byte          // the FPCA that signs the callers' client certificates
+// 	//Responder func(*tls.Conn)
+// }
+
 type listener struct {
-	Endpoint string                  // ip:port or abc.domain.tld or xyz.onion address
+	OnionAddress string              // xyz.onion address
+	Endpoint string                  // our local listening point (where the onion data gets delivered) TODO remove from onionlistener.
 	ListenerCN string                // our CN (server name)
 	ListenerTLSCertPEM []byte        // the cert we provide to the callers/clients
 	ListenerTLSPrivKeyPEM []byte     // and the private key
 
-	CallerCN string                   // the caller's CN we expect
-	CallerCertPEM  []byte             // the caller's certificate  (superfluous)
-	CallerFPCACertPEM []byte          // the FPCA that signs the callers' client certificates
+	CallerCN string                  // the caller's CN we expect
+	CallerCertPEM  []byte            // the caller's certificate  (superfluous)
+	CallerFPCACertPEM []byte         // the FPCA that signs the callers' client certificates
 	//Responder func(*tls.Conn)
+
+	OnionPrivKey []byte              // the privkey of the ephemeral .onion address
 }
 
 
-func createListener(endpoint string, ourCreds *credentials, callerCert *x509.Certificate) (listener) {
-	log.Printf("createListener at %v", endpoint)
-
+func createTorListener(ourCreds *credentials, callerCert *x509.Certificate) (listener) {
 	// check to see if we get sane credentials
 	_, err := tls.X509KeyPair(ourCreds.Cert, ourCreds.Priv)
 	check(err)
 
+	// Fetch the Signer of the invitee/caller
 	callerCN := callerCert.Subject.CommonName
 	callerFPCACert, err := findFPCACert(callerCN)
 	check(err)
 	log.Printf("CallerFPCACert is: %#v", callerFPCACert.Subject.CommonName)
 	callerCertPEM := eccentric.PEMEncode(callerCert)
 	callerFPCACertPEM := eccentric.PEMEncode(callerFPCACert)
+
+	// Create listening socket for the onion hidden service and get its endpoint address
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	check(err)
+	endpoint := l.Addr().String()
+
+	// Create a .onion endpoint at port 443
+	tc := &goControlTor.TorControl{}
+	err = tc.Dial("unix", "/var/run/tor/control")
+	check(err)
+	err = tc.CookieAuthenticate("/var/run/tor/control.authcookie")
+	check(err)
+	log.Printf("Logged into Tor, creating hidden service")
+	onion, onionPrivKey, err := tc.CreateEphemeralHiddenService("443", endpoint)
+	check(err)
+	log.Printf("Created onion address: %v", onion)
+	onionAddress := fmt.Sprintf("%s.onion:443", onion)
+
+	log.Printf("createListener at %v for %v", endpoint, onionAddress)
 
 	return listener {
 		Endpoint: endpoint,
@@ -54,8 +89,38 @@ func createListener(endpoint string, ourCreds *credentials, callerCert *x509.Cer
 		CallerCN: callerCN,
 		CallerCertPEM: callerCertPEM,
 		CallerFPCACertPEM: callerFPCACertPEM,
+
+		OnionAddress: onionAddress,
+		OnionPrivKey: []byte(onionPrivKey),
 	}
 }
+
+
+// func createListener(endpoint string, localEndpoint string, ourCreds *credentials, callerCert *x509.Certificate) (listener) {
+// 	log.Printf("createListener at %v", endpoint)
+
+// 	// check to see if we get sane credentials
+// 	_, err := tls.X509KeyPair(ourCreds.Cert, ourCreds.Priv)
+// 	check(err)
+
+// 	callerCN := callerCert.Subject.CommonName
+// 	callerFPCACert, err := findFPCACert(callerCN)
+// 	check(err)
+// 	log.Printf("CallerFPCACert is: %#v", callerFPCACert.Subject.CommonName)
+// 	callerCertPEM := eccentric.PEMEncode(callerCert)
+// 	callerFPCACertPEM := eccentric.PEMEncode(callerFPCACert)
+
+// 	return listener {
+// 		Endpoint: endpoint,
+// 		ListenerCN: ourCreds.CN,
+// 		ListenerTLSCertPEM: ourCreds.Cert,
+// 		ListenerTLSPrivKeyPEM: ourCreds.Priv,
+
+// 		CallerCN: callerCN,
+// 		CallerCertPEM: callerCertPEM,
+// 		CallerFPCACertPEM: callerFPCACertPEM,
+// 	}
+// }
 
 
 func findFPCACert(cn string) (*x509.Certificate, error) {
@@ -72,17 +137,40 @@ func findFPCACert(cn string) (*x509.Certificate, error) {
 
 // Start each of the listeners.
 // To be called at startup
-func startAllListeners() {
+func restartAllTorListeners() {
 	listeners, err := getAllListeners()
 	check(err)
 
 	for _, listener := range listeners {
-		startListener(listener)
+		restartTorListener(listener)
 	}
 }
 
 
-func startListener(listener listener) {
+// func startListener(listener listener) {
+// 	// The CA-pool specifies which client certificates can log in to our site.
+// 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
+// 	pool := x509.NewCertPool()
+// 	pool.AddCert(&CallerFPCACert)
+
+// 	listenerTLSCert, err := tls.X509KeyPair(listener.ListenerTLSCertPEM, listener.ListenerTLSPrivKeyPEM)
+// 	check(err)
+
+// 	listenerConfig :=  &tls.Config{
+// 		ServerName: listener.ListenerCN,
+// 		Certificates: []tls.Certificate{listenerTLSCert},
+// 		ClientCAs: pool,
+// 		ClientAuth: tls.RequireAndVerifyClientCert,
+// 	}
+
+// 	netl, err := net.Listen("tcp", listener.Endpoint)
+// 	check(err)
+// 	log.Printf("Started Listener at %v for %v", listener.Endpoint, listener.Endpoint)
+// 	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN)
+// }
+
+
+func restartTorListener(listener listener) {
 	// The CA-pool specifies which client certificates can log in to our site.
 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
 	pool := x509.NewCertPool()
@@ -98,9 +186,25 @@ func startListener(listener listener) {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
-	netl, err := net.Listen("tcp", listener.Endpoint)
+	netl, err := net.Listen("tcp", "127.0.0.1:0")
 	check(err)
-	log.Printf("Started Listener at %v", listener.Endpoint)
+	endpoint := netl.Addr().String()
+
+	// Restart a .onion endpoint at port 443
+	tc := &goControlTor.TorControl{}
+	err = tc.Dial("unix", "/var/run/tor/control")
+	check(err)
+	err = tc.CookieAuthenticate("/var/run/tor/control.authcookie")
+	check(err)
+	log.Printf("Logged into Tor, restarting hidden service")
+	onion, err := tc.RestartEphemeralHiddenService(listener.OnionPrivKey, "443", endpoint)
+	check(err)
+	log.Printf("Started onion address: %v", onion)
+	onionAddress := fmt.Sprintf("%s.onion:443", onion)
+	if onionAddress != listener.OnionAddress {
+		panic("Restarted with different address than when we started.")
+	}
+	log.Printf("Started Listener at %v for %v", endpoint, onionAddress)
 	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN)
 }
 

@@ -48,7 +48,7 @@ func getFirst(s []string) (string) {
 		return s[1]
 	}
 	// TODO: error out if required parameter is missing
-	return ""	
+	return ""
 }
 
 //---------------------------------------------------------------------------------
