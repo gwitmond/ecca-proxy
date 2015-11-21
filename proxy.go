@@ -35,6 +35,7 @@ var registerURLmap = map[string]string{}
 var port = flag.Int("p", 8000, "port to listen to")
 var verbose = flag.Bool("v", true, "should every proxy request be logged to stdout")
 //var registryUrl = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1024/", "The Registry of (dis)honesty to query for duplicate certificates.")
+var torSocksPort = flag.String("torsocks", "127.0.0.1:9050", "The address of the TorSocks port to connect to for outbound connections")
 
 func main() {
 	flag.Parse()
@@ -149,13 +150,27 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 
 // encrypt a message with a public key from a certificate in the url.
 func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
-	// First, fetch the recipients public key from where the server tells us to expect it.
+	// First, check our credentials
+	// get the current logged in account (and private key)
+	// TODO: change to use the server certificate Root CA identity. Not the req.URL.Host.
+	log.Printf("req.URL.Host is: %v\n ", req.URL.Host)
+	creds := getLoggedInCreds(req.URL.Host)
+
+	if creds == nil {
+		log.Println("Form says to encrypt and sign a message but no user is logged in.\nConfigure server to require login before handing the form.\nHint: Use the ecca.LoggedInHandler.")
+		return nil, goproxy.NewResponse(req,
+			goproxy.ContentTypeText, http.StatusInternalServerError,
+			"Ecca Proxy error: Server says to sign your message but you haven't logged in. Please log in first, then type your message again. Later we might cache your data and redirect you to the login-screen.")
+	}
+	log.Printf("creds are: %v\n", creds.CN)
+
+	// Second, fetch the recipients public key from where the server tells us to expect it.
 	certPEM, err := fetchCertificatePEM( req.Form.Get("certificate_url"))
 	check(err)
 
-	// Do the actual encryption
+	// Do the actual signing and encrypting
 	cleartext := req.Form.Get("cleartext")
-	ciphertext := Encrypt(cleartext, certPEM)
+	ciphertext := SignAndEncryptPEM(creds.Priv, creds.Cert, certPEM, cleartext)
 	req.Form.Set("ciphertext", string(ciphertext))
 
 	// TODO: refactor this duplicate code from signMessage
@@ -177,7 +192,7 @@ func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
 // signMessage signs a message with our current logged in account (private key) and adds the signature to the original request. Then it sends it on to the web site.
 func signMessage(req  *http.Request, ctx *goproxy.ProxyCtx)  (*http.Request, *http.Response) {
 	cleartext := req.Form.Get("cleartext")
-	// cleartext is the message, for now we ignore the title and other fields in theg signature
+	// cleartext is the message, for now we ignore the title and other fields in the signature
 
 	// get the current logged in account (and private key)
 	// TODO: change to use the server certificate Root CA identity. Not the req.URL.Host.
@@ -476,7 +491,9 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			if decode == true {
 				// replace cleartext with decrypted ciphertext
 				ciphertext := ciphertextNode.GetValue()
-				cleartext, senderCert := DecryptAndVerify([]byte(ciphertext), cred.Priv)
+				cleartext, senderCert, err := DecryptAndVerify([]byte(ciphertext), cred.Priv)
+				check(err)
+				log.Printf("cleartext is: %v", cleartext[:50])
 				log.Printf("Identity from message is %s\n", senderCert.Subject.CommonName)
 				sender := senderCert.Subject.CommonName
 				if senderNode.GetValue() != sender {
@@ -525,10 +542,15 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 	log.Printf("cleartext is [%#v]", cleartext[:50])
 
 	// See if we can decode it into a invitation-struct
-	invitation, err := parseInvitation(cleartext)
-	check(err)
+	invitation := parseInvitation(cleartext)
+	if invitation == nil {
+		// it's not an invitation, signal that.
+		return nil
+	}
+
 	log.Printf("Received Invitation from: %v, at %v, to %v", invitation.ListenerCN, invitation.Endpoint, invitation.InviteeCN)
 
+	// Create a button to connect to inviter
 	// Save the invitation in a table under a random token
 	// to prevent sites from creating dial-buttons themselves.
 	token := storeInvitation(invitation)
@@ -551,20 +573,21 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 }
 
 // parseInvitation takes a base64 encoded string and check if it can be parsed an DCInvitation
-func parseInvitation(cleartext string) (*DCInvitation, error) {
+func parseInvitation(cleartext string) (*DCInvitation) {
 	message, err := base64.StdEncoding.DecodeString(cleartext)
 	if err != nil {
+		log.Printf("Decoding invitation failed: %#v, %#v", message, err)
 		// not base64 encoded, it's probably a text message
-		return nil, nil
+		return nil
 	}
 
 	decoder := gob.NewDecoder(bytes.NewReader(message))
 	var invitation DCInvitation
 	err = decoder.Decode(&invitation)
-	check(err) // die on err as we don't have other base64 encoded messages.
+	check(err) // die on error as we don't have other base64 encoded messages.
 	// we can't show the binary data after base64 decoding either.
 
-	return &invitation, nil
+	return &invitation
 }
 
 // makeNode makes an xmlx.Node with the given attributes

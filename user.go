@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"io"
 	"io/ioutil"
+	"strings"
 	"html/template"
 	"crypto/rsa"
 	"crypto/tls"
@@ -439,22 +440,25 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	// Connect to the onion endpoint
 	socks := &socks4a.Socks4a {
 		Network: "tcp",
-		Address: "127.0.0.1:9050",
+		Address: *torSocksPort,
 	}
 	conn, err := socks.Dial(invitation.Endpoint)
-	check(err)
+	if err != nil {
+		log.Printf("Error dialing endpoint: %#v; reason: %#v", invitation.Endpoint, err)
+		return fmt.Sprintf("Error dialing endpoint: %#v; reason: %#v", invitation.Endpoint, err)
+	}
 
 	// start TLS over the onion connection
 	tlsconn := tls.Client(conn, &clientConfig)
 	err = tlsconn.Handshake()
 	check(err)
 
-	go startPayload(tlsconn)
+	go startPayload(tlsconn, invitation.ListenerCN)
 	return "Started Simple Chat app."
 }
 
 // Start the simple chat app on the encrypted channel.
-func startPayload(tlsconn *tls.Conn){
+func startPayload(tlsconn *tls.Conn, remoteCN string){
 	// Create listener socket for the simple chat
 	socket, err := net.Listen("tcp", "[::1]:0")
 	check (err)
@@ -471,7 +475,9 @@ func startPayload(tlsconn *tls.Conn){
 	check(err)
 
 	// show a welcome message
-	app.Write([]byte("Connected, chat away!\n---------------------\n"))
+	mess := fmt.Sprintf("Connected to %s, chat away!\n", remoteCN)
+	app.Write([]byte(mess))
+	app.Write([]byte(fmt.Sprintf("%s\n", strings.Repeat("-", len(mess) -1))))
 
 	// copy the TLS-connection to the chat app and back
 	go io.Copy(app, tlsconn)

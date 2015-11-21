@@ -24,21 +24,6 @@ import (
 )
 
 
-// Encrypt a cleartext message with the public key in the certificate of the recipient using openssl
-func Encrypt(cleartext string, certPEM []byte) []byte {
-	certFileName := makeTempfile("ecca-cert", certPEM)
-	defer os.Remove(certFileName)
-	err, stdout, _ := run(strings.NewReader(cleartext),
-		"openssl", "smime", "-encrypt", "-aes128", "-binary", "-outform", "DER", certFileName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	cipherDER := stdout.Bytes()
-	cipherPEM := pem.EncodeToMemory(&pem.Block{Type: "ECCA ENCRYPTED MESSAGE", Bytes: cipherDER})
-	return cipherPEM
-}
-
-
 // fetchCertificate GETs the url and parses the page as a PEM encoded certificate.
 func fetchCertificatePEM(certificateURL string) ([]byte, error) {
 	certURL, err := url.Parse(certificateURL)
@@ -79,37 +64,9 @@ func fetchCertificatePEM(certificateURL string) ([]byte, error) {
 }
 
 
-// Decrypting a message using openssl
-func Decrypt(cipherPEM []byte, privkeyPEM []byte) string {
-
-	if len(cipherPEM) == 0 {
-		return "Error, no secret message here. In fact, nothing at all."
-	}
-
-	cipherBlock, _ := pem.Decode(cipherPEM)
-	if cipherBlock == nil {
-		return "Error, no secret message here. Nothing we could recognize."
-	}
-
-	if cipherBlock.Type != "ECCA ENCRYPTED MESSAGE" {
-		return "Error decoding secret message: expecting -----ECCA ENCRYPTED MESSAGE-----"
-	}
-
-	keyFileName := makeTempfile("ecca-key-", privkeyPEM)
-	defer os.Remove(keyFileName)
-
-	err, stdout, stderr := run(bytes.NewReader(cipherBlock.Bytes),
-		"openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", keyFileName)
-	if err != nil {
-		return fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String())
-	}
-
-	cleartext := stdout.String()
-	return cleartext
-}
-
-
 // Sign a message
+// Sign a message to be posted in public places.
+// This attaches ownership of the private key to the message.
 func Sign(privkeyPEM []byte, certPEM []byte, message string) (string, error) {
 	// log.Printf("signing %v\n", message)
 	if len(message) == 0 {
@@ -174,7 +131,6 @@ func run(stdin io.Reader, command string, args ... string) (error, bytes.Buffer,
 
 // Fetch the identity (users' client certificate) from the signed message.
 func FetchIdentity(signature string) *x509.Certificate {
-	// log.Printf("fetching identity\n")
 	err, pk7, stderr := run(strings.NewReader(signature),
 		"openssl", "smime", "-pk7out")
 	if err != nil {
@@ -244,18 +200,18 @@ if len(message) == 0 {
 
 
 // Decrypt with own key and verify signature to retrieve sender's identity
-func DecryptAndVerify(cipherPEM []byte, privkeyPEM []byte) (string, *x509.Certificate) {
+func DecryptAndVerify(cipherPEM []byte, privkeyPEM []byte) (string, *x509.Certificate, error) {
 	if len(cipherPEM) == 0 {
-		return "Error, no secret message here. In fact, nothing at all.", nil
+		return "", nil, errors.New( "Error, no secret message here. In fact, nothing at all.")
 	}
 
 	cipherBlock, _ := pem.Decode(cipherPEM)
 	if cipherBlock == nil {
-		return "Error, no secret message here. Nothing we could recognize.", nil
+		return "", nil, errors.New("Error, no secret message here. Nothing we could recognize.")
 	}
 
 	if cipherBlock.Type != "ECCA ENCRYPTED SIGNED MESSAGE" {
-		return "Error, expecting -----ECCA ENCRYPTED SIGNEDMESSAGE-----", nil
+		return "", nil, errors.New("Error, expecting -----ECCA ENCRYPTED SIGNED MESSAGE-----")
 	}
 
 	keyFileName := makeTempfile("ecca-key-", privkeyPEM)
@@ -264,7 +220,7 @@ func DecryptAndVerify(cipherPEM []byte, privkeyPEM []byte) (string, *x509.Certif
 	err, stdout, stderr := run(bytes.NewReader(cipherBlock.Bytes),
 		"openssl", "smime", "-decrypt", "-binary", "-inform", "DER", "-inkey", keyFileName)
 	if err != nil {
-		return fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String()), nil
+		return "", nil, errors.New(fmt.Sprintf("Error decrypting message. Openssl says: %s\n", stderr.String()))
 	}
 	signedMessage := stdout.String()
 
@@ -285,8 +241,8 @@ func DecryptAndVerify(cipherPEM []byte, privkeyPEM []byte) (string, *x509.Certif
 
 	valid, message := Verify("ignore", signedMessage, chain)
 	if valid {
-		return message, senderCert
+		return message, senderCert, nil
 	} else {
-		return "(invalid signature, suppressing message)", nil
+		return "(invalid signature, suppressing message)", nil, nil
 	}
 }

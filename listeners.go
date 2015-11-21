@@ -172,6 +172,8 @@ func restartAllTorListeners() {
 
 func restartTorListener(listener listener) {
 	// The CA-pool specifies which client certificates can log in to our site.
+	log.Printf("Starting Tor listener at address: %v", listener.OnionAddress)
+
 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
 	pool := x509.NewCertPool()
 	pool.AddCert(&CallerFPCACert)
@@ -201,7 +203,7 @@ func restartTorListener(listener listener) {
 	check(err)
 	log.Printf("Started onion address: %v", onion)
 	onionAddress := fmt.Sprintf("%s.onion:443", onion)
-	if onionAddress != listener.OnionAddress {
+	if onion != "" && onionAddress != listener.OnionAddress {
 		panic("Restarted with different address than when we started.")
 	}
 	log.Printf("Started Listener at %v for %v", endpoint, onionAddress)
@@ -257,6 +259,6 @@ func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN st
 
 	// Now we have established an authenticated connection to the EXPECTED party.
 	// Hand the socket to the user app
-	startPayload(tlsconn)
+	startPayload(tlsconn, userCN)
 	return
 }
