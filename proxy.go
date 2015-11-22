@@ -322,8 +322,8 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		return nil, resp
 	}
 
-	log.Fatal("Unexpected method: ", req.Method)
-	return nil, nil
+	log.Printf("Unexpected method: %#v", req)
+	return nil, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusBadRequest, "Unexpected method.")
 }
 
 
@@ -572,7 +572,9 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 	return form
 }
 
-// parseInvitation takes a base64 encoded string and check if it can be parsed an DCInvitation
+// parseInvitation takes a string and checks if it can be parsed as a base64 encoded DCInvitation
+// Returns either the invitation or nil.
+// We assume no other base64 encoded content.
 func parseInvitation(cleartext string) (*DCInvitation) {
 	message, err := base64.StdEncoding.DecodeString(cleartext)
 	if err != nil {

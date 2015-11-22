@@ -34,7 +34,7 @@ import (
 
 type listener struct {
 	OnionAddress string              // xyz.onion address
-	Endpoint string                  // our local listening point (where the onion data gets delivered) TODO remove from onionlistener.
+	Endpoint string                  // our local listening point (where the onion data gets delivered)
 	ListenerCN string                // our CN (server name)
 	ListenerTLSCertPEM []byte        // the cert we provide to the callers/clients
 	ListenerTLSPrivKeyPEM []byte     // and the private key
@@ -188,7 +188,12 @@ func restartTorListener(listener listener) {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
-	netl, err := net.Listen("tcp", "127.0.0.1:0")
+	// Reopen the endpoint that was used to create the hidden service.
+	// Tor assumes it's only used for services at well known ports that never change.
+	// It appears that changing the local listening port to a fresh port at restart
+	// of the proxy makes other tor nodes that have connected to us before break.
+	// Those nodes return fail to connect.
+	netl, err := net.Listen("tcp", listener.Endpoint)
 	check(err)
 	endpoint := netl.Addr().String()
 

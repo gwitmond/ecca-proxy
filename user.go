@@ -175,7 +175,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
 	}
-	log.Fatal("Unexpected method: ", req.Method)
+	log.Printf("Unexpected method: %#v", req.Method)
 	return nil, nil
 }
 
@@ -378,13 +378,19 @@ func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 	case "POST":
 		connectionID := req.Form.Get("connectionID")
 		if connectionID == "" {
-			log.Fatal("Missing connectionID")
+			log.Printf("Missing connectionID")
+			return nil, goproxy.NewResponse(req,
+				goproxy.ContentTypeText, http.StatusBadRequest,
+				"Missing connectionID.")
 		}
 		log.Printf("handleDirectConnection has connectionID: %s", connectionID)
 
 		invitation := getInvitation(connectionID)
 		if invitation == nil {
-			log.Fatal("Wrong connectionID")
+			log.Printf("Wrong connectionID")
+			return nil, goproxy.NewResponse(req,
+				goproxy.ContentTypeText, http.StatusBadRequest,
+				"Proxy has been restarted since this page was served. Please log in again.")
 		}
 
 		//log.Printf("invitation is: %#v", invitation)
@@ -413,7 +419,7 @@ func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 		return nil, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusOK, response)
 	}
 
-	log.Fatal("Unexpected method: ", req.Method)
+	log.Printf("Unexpected method: %#v", req.Method)
 	return nil, nil
 }
 
