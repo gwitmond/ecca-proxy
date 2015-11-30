@@ -1,0 +1,17 @@
+Source: ecca-proxy
+Section: ecca
+Priority: extra
+Maintainer: Guido Witmond <guido@witmond.nl>
+Build-Depends: debhelper (>=9), golang-go (>=2:1.4)
+Standards-Version: 3.9.4
+Homepage: https://github.com/gwitmond/ecca-proxy
+
+Package: ecca-proxy
+Architecture: any
+Depends: tor (>= 0.2.7.5), netcat6, ${shlibs:Depends}, ${misc:Depends}
+Description: User agent that manages your privacy and security.
+  This is the User Agent for Eccentric-Authentication.
+  Eccentric-Authentication is an authentication and encryption protocol that makes cryptography
+  usabe for anyone. The user agent manages your private keys - one or more - for each site you
+  visit. It offers end-to-end encrypted private messages and secure tunnels between anyone.
+

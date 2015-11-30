@@ -35,10 +35,12 @@ var registerURLmap = map[string]string{}
 var port = flag.Int("p", 8000, "port to listen to")
 var verbose = flag.Bool("v", true, "should every proxy request be logged to stdout")
 //var registryUrl = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1024/", "The Registry of (dis)honesty to query for duplicate certificates.")
+var datastore = flag.String("datastore", "ecca-proxy.sqlite3", "The location where to store the identities and invitations")
 var torSocksPort = flag.String("torsocks", "127.0.0.1:9050", "The address of the TorSocks port to connect to for outbound connections")
 
 func main() {
 	flag.Parse()
+	init_datastore(*datastore)
 
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose

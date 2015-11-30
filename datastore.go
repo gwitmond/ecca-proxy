@@ -21,8 +21,8 @@ import (
 
 var dbmap *gorp.DbMap
 
-func init() {
-        db, err := sql.Open("sqlite3", "./proxy.sqlite3")
+func init_datastore(datastore string) {
+        db, err := sql.Open("sqlite3", datastore)
         check(err)
         dbmap = &gorp.DbMap{Db: db, Dialect: gorp.SqliteDialect{}}
         dbmap.AddTableWithName(credentials{}, "credentials")  // .SetKeys(false, "CN", "Realm")
