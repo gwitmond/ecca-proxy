@@ -433,7 +433,7 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	pool := x509.NewCertPool()
 	pool.AddCert(fpca)
 
-	log.Printf("calling: %v at %v", invitation.ListenerCN, invitation.Endpoint)
+	log.Printf("calling: %v at %v for %v", invitation.ListenerCN, invitation.Endpoint, invitation.Application)
 	clientConfig := tls.Config{
 		ServerName: invitation.ListenerCN,
 		Certificates: []tls.Certificate{ourCert},
@@ -459,12 +459,20 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	err = tlsconn.Handshake()
 	check(err)
 
-	go startPayload(tlsconn, invitation.ListenerCN)
-	return "Started Simple Chat app."
+	go startPayload(tlsconn, invitation.ListenerCN, invitation.Application)
+	return fmt.Sprintf("Starting application: %s.", invitation.Application)
+}
+
+// Start the requested application eg. chat/voice/video etc
+func startPayload(tlsconn *tls.Conn, remoteCN, app string){
+	switch app {
+	case "chat": startChatApp(tlsconn, remoteCN)
+	case "voice": startVoiceApp(tlsconn, remoteCN)
+	}
 }
 
 // Start the simple chat app on the encrypted channel.
-func startPayload(tlsconn *tls.Conn, remoteCN string){
+func startChatApp(tlsconn *tls.Conn, remoteCN string){
 	// Create listener socket for the simple chat
 	socket, err := net.Listen("tcp", "[::1]:0")
 	check (err)
@@ -497,6 +505,35 @@ func startPayload(tlsconn *tls.Conn, remoteCN string){
 	// We run this only once.
 	app.Close()
 	socket.Close()
+	tlsconn.Close()
+}
+
+// Start the simple voice app on the encrypted channel.
+func startVoiceApp(tlsconn *tls.Conn, remoteCN string){
+	// start the speaker part and connect it to our socket
+	spr := exec.Command("/usr/bin/aplay")
+	spr.Stdin = tlsconn
+	err := spr.Start() // start asynchronously
+	check(err)
+
+	// start the microphone too
+	// defaults: 1 channel 8000 Hz sample rate, WAVE format
+	mic := exec.Command("/usr/bin/arecord")
+	mic.Stdout = tlsconn
+	err = mic.Start() // start asynchronously
+	check(err)
+
+	// TODO: write a ping to signal connection
+	// mess := text_to_speech("Connected to %s, chat away!\n", remoteCN)
+	// app.Write([]byte(mess))
+
+	// wait for it to finish
+	// TODO: find a way to hang up the connection, short of killall arecord/aplay
+	err = mic.Wait()
+	check(err)
+	err = spr.Wait()
+	check(err)
+
 	tlsconn.Close()
 }
 

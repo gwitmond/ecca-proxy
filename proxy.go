@@ -240,6 +240,7 @@ func signMessage(req  *http.Request, ctx *goproxy.ProxyCtx)  (*http.Request, *ht
 
 
 type DCInvitation struct {
+	Application     string   // what protocol to talk: chat/voice/video etc.
 	InviteeCN       string   // who is invited to connect
 	Endpoint        string   // where to connect to: ip:port, xyz.onion, etc
 	ListenerCN      string   // expect listener to identify with this CN (tls: server name)
@@ -253,6 +254,15 @@ func init() {
 func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response) {
 	switch req.Method {
 	case "POST":
+		// Test the simplest things first, the application parameter :-)
+		application := req.Form.Get("application")
+		if application != "chat" && application != "voice" {
+			log.Printf("Wrong application, only chat/voice allowed, got %#v", application)
+			return nil, goproxy.NewResponse(req,
+				goproxy.ContentTypeText, http.StatusInternalServerError,
+				"Ecca Proxy error: Wrong application, only chat/voice allowed.")
+		}
+
 		// get the current logged in account (and private key)
 		// TODO: get these from the site
 		log.Printf("req.URL.Host is: %v\n ", req.URL.Host)
@@ -285,13 +295,14 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		// TODO: Store the results for later
 
 		// Create (and start) a Tor-Listener for this recipient
-		listener := createTorListener(ourCreds, recipCert)
+		listener := createTorListener(ourCreds, recipCert, application)
 		// Store listening address in database to listen again at restart of the proxy.
 		// I.E. make these listening endpoints permanent.
 		storeListener(listener)
 
 		hostname := getHostname(ourCreds.Hostname)
 		invitation := DCInvitation{
+			Application: application,
 			InviteeCN: recipCert.Subject.CommonName,
 			Endpoint: listener.OnionAddress,
 			ListenerCN: ourCreds.CN + "@@" + hostname,
@@ -567,7 +578,7 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 		"value": token})
 	submit := makeNode("input", map[string]string{
 		"type": "submit",
-		"value": "Connect me to " + senderCert.Subject.CommonName})
+		"value": fmt.Sprintf("Connect me to %s for %s", senderCert.Subject.CommonName, invitation.Application)})
 	form.AddChild(connID)
 	form.AddChild(submit)
 

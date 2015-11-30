@@ -33,6 +33,7 @@ import (
 // }
 
 type listener struct {
+	Application string               // chat/voice/video/ etc, as long as both endpoint agree 
 	OnionAddress string              // xyz.onion address
 	Endpoint string                  // our local listening point (where the onion data gets delivered)
 	ListenerCN string                // our CN (server name)
@@ -42,13 +43,12 @@ type listener struct {
 	CallerCN string                  // the caller's CN we expect
 	CallerCertPEM  []byte            // the caller's certificate  (superfluous)
 	CallerFPCACertPEM []byte         // the FPCA that signs the callers' client certificates
-	//Responder func(*tls.Conn)
 
 	OnionPrivKey []byte              // the privkey of the ephemeral .onion address
 }
 
 
-func createTorListener(ourCreds *credentials, callerCert *x509.Certificate) (listener) {
+func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app string) (listener) {
 	// check to see if we get sane credentials
 	_, err := tls.X509KeyPair(ourCreds.Cert, ourCreds.Priv)
 	check(err)
@@ -81,6 +81,7 @@ func createTorListener(ourCreds *credentials, callerCert *x509.Certificate) (lis
 	log.Printf("createListener at %v for %v", endpoint, onionAddress)
 
 	return listener {
+		Application: app,
 		Endpoint: endpoint,
 		ListenerCN: ourCreds.CN,
 		ListenerTLSCertPEM: ourCreds.Cert,
@@ -188,12 +189,19 @@ func restartTorListener(listener listener) {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
+
+	// This is what we want:
+	// use a fresh port guaranteed to be available
+	//netl, err := net.Listen("tcp", "127.0.0.1:0")
+
+	// This is what we do:
 	// Reopen the endpoint that was used to create the hidden service.
 	// Tor assumes it's only used for services at well known ports that never change.
 	// It appears that changing the local listening port to a fresh port at restart
 	// of the proxy makes other tor nodes that have connected to us before break.
-	// Those nodes return fail to connect.
+	// Those nodes fail to connect the first N attempts.
 	netl, err := net.Listen("tcp", listener.Endpoint)
+
 	check(err)
 	endpoint := netl.Addr().String()
 
@@ -212,25 +220,25 @@ func restartTorListener(listener listener) {
 		panic("Restarted with different address than when we started.")
 	}
 	log.Printf("Started Listener at %v for %v", endpoint, onionAddress)
-	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN)
+	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN, listener.Application)
 }
 
 
 // Await Incoming connection on the given net.Listener.
-func AwaitIncomingConnection(listener net.Listener, serverConfig *tls.Config, userCN string) {
+func AwaitIncomingConnection(listener net.Listener, serverConfig *tls.Config, userCN, app string) {
 	log.Printf("Awaiting connections on %v", listener.Addr())
 
 	for {
 		conn, err := listener.Accept()
 		check(err)
-		go answerIncomingConnection(conn, serverConfig, userCN)
+		go answerIncomingConnection(conn, serverConfig, userCN, app)
 	}
 }
 
 
 // Answer the incoming connection, verify the identity of the remote party.
 // Hang up if it is not the one we expect.
-func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN string) {
+func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN, app string) {
 	log.Printf("Connection from: %v", conn.RemoteAddr())
 
 	tlsconn := tls.Server(conn, serverConfig)
@@ -264,6 +272,6 @@ func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN st
 
 	// Now we have established an authenticated connection to the EXPECTED party.
 	// Hand the socket to the user app
-	startPayload(tlsconn, userCN)
+	startPayload(tlsconn, userCN, app)
 	return
 }
