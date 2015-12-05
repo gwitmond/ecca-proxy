@@ -525,7 +525,7 @@ func startVoiceApp(tlsconn *tls.Conn, remoteCN string){
 
 	// TODO: write a ping to signal connection
 	// mess := text_to_speech("Connected to %s, chat away!\n", remoteCN)
-	// app.Write([]byte(mess))
+	// spr.Write([]byte(mess))
 
 	// wait for it to finish
 	// TODO: find a way to hang up the connection, short of killall arecord/aplay

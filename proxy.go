@@ -20,9 +20,7 @@ import (
 	"os"
 	"io/ioutil"
 	"bytes"
-	"encoding/gob"
 	"encoding/xml"
-	"encoding/base64"
 	"html/template"
 	"github.com/gwitmond/go-pkg-xmlx"
 	"github.com/gwitmond/unbound"
@@ -122,13 +120,12 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 			// create a direct connection listener, awaiting reply
 			return initiateDirectConnection(req)
 		} else if req.Form.Get("encrypt") == "required" {
-			// transparantly encrypt the message to the recipient
+			// transparantly encrypt and sign for a private message
 			return encryptMessage(req)
 		} else if req.Form.Get("sign") == "required" || req.Form.Get("sign") == "optional" {
 			// transparently sign the message before publication
 			return signMessage(req, ctx)
 		}
-		//TODO: handle signing and encrypting at one operation for secure messaging.
 	}
 
 	// Fetch the request from upstream
@@ -154,7 +151,13 @@ func eccaProxy (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.
 func encryptMessage(req  *http.Request)  (*http.Request, *http.Response) {
 	// First, check our credentials
 	// get the current logged in account (and private key)
+
 	// TODO: change to use the server certificate Root CA identity. Not the req.URL.Host.
+	// log.Printf("req.tls.ConnectionState is %#v", req.TLS) => returns nil
+	// Need to connect to the site, fetch and check the server cert;
+	// Then we know the site's cert and RootCa;
+	// With that rootCA we fetch our credentials.
+
 	log.Printf("req.URL.Host is: %v\n ", req.URL.Host)
 	creds := getLoggedInCreds(req.URL.Host)
 
@@ -210,6 +213,7 @@ func signMessage(req  *http.Request, ctx *goproxy.ProxyCtx)  (*http.Request, *ht
 		}
 
 		// creds is nil but signing is optional. Send the current form unchanged to the upstream server.
+		// TODO: show this to the user and confirm to prevent mistakes.
 		resp, err := fetchRequest(req, ctx)
 		check(err)
 		return nil, resp
@@ -238,18 +242,6 @@ func signMessage(req  *http.Request, ctx *goproxy.ProxyCtx)  (*http.Request, *ht
 	return nil, resp
 }
 
-
-type DCInvitation struct {
-	Application     string   // what protocol to talk: chat/voice/video etc.
-	InviteeCN       string   // who is invited to connect
-	Endpoint        string   // where to connect to: ip:port, xyz.onion, etc
-	ListenerCN      string   // expect listener to identify with this CN (tls: server name)
-	ListenerFPCAPEM []byte   // signed by this CA.
-}
-
-func init() {
-	gob.Register(DCInvitation{})
-}
 
 func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response) {
 	switch req.Method {
@@ -310,13 +302,8 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		}
 		log.Printf("Make invitation from %v, at %v to %v", invitation.ListenerCN, invitation.Endpoint, invitation.InviteeCN)
 
-		var message bytes.Buffer
-		encoder := gob.NewEncoder(&message)
-		err = encoder.Encode(invitation)
-		check(err)
-		mess_64 := base64.StdEncoding.EncodeToString(message.Bytes())
-
-		ciphertext := SignAndEncryptPEM(ourCreds.Priv, ourCreds.Cert, recipCertPEM, mess_64)
+		var message = encodeInvitation(invitation)
+		ciphertext := SignAndEncryptPEM(ourCreds.Priv, ourCreds.Cert, recipCertPEM, message)
 		req.Form.Set("ciphertext", string(ciphertext))
 		// Send the invitation to site for delivery to the recipient
 		// TODO: refactor this duplicate code from encryptMessage
@@ -433,9 +420,6 @@ func fetchRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Response, err
 	resp = redirectToSelector(req)
 	return resp, nil
 }
-
-
-
 
 
 // IsRepsonseRedirected checks to see if the response has any set of the known redirect codes
@@ -585,25 +569,6 @@ func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certifica
 	return form
 }
 
-// parseInvitation takes a string and checks if it can be parsed as a base64 encoded DCInvitation
-// Returns either the invitation or nil.
-// We assume no other base64 encoded content.
-func parseInvitation(cleartext string) (*DCInvitation) {
-	message, err := base64.StdEncoding.DecodeString(cleartext)
-	if err != nil {
-		log.Printf("Decoding invitation failed: %#v, %#v", message, err)
-		// not base64 encoded, it's probably a text message
-		return nil
-	}
-
-	decoder := gob.NewDecoder(bytes.NewReader(message))
-	var invitation DCInvitation
-	err = decoder.Decode(&invitation)
-	check(err) // die on error as we don't have other base64 encoded messages.
-	// we can't show the binary data after base64 decoding either.
-
-	return &invitation
-}
 
 // makeNode makes an xmlx.Node with the given attributes
 func makeNode(name string, attrs map[string]string) *xmlx.Node {

@@ -52,7 +52,7 @@ func getFirst(s []string) (string) {
 }
 
 //---------------------------------------------------------------------------------
-// Marshall a rsa.PublicKey into DER and PEM encoding 
+// Marshall a rsa.PublicKey into DER and PEM encoding
 
 // type pkixPublicKey copied from crypto/x509/x509.go as it is not exported there.
 type pkixPublicKey struct {
@@ -89,7 +89,7 @@ func marshalPublicKey(pubkey rsa.PublicKey) ([]byte) {
 // PublicKeyToPEM: encode a rsa.PublicKey to PEM to make it easy to post in a http-form
 func publicKeyToPEM (pubkey rsa.PublicKey) (string) {
 	derBytes := marshalPublicKey(pubkey)
-	
+
 	var pubkeyPEM  bytes.Buffer
         pem.Encode(&pubkeyPEM, &pem.Block{Type: "PUBLIC KEY", Bytes: derBytes})
 	return pubkeyPEM.String()
@@ -105,5 +105,5 @@ func pemDecodeCertificate(body []byte) (cert tls.Certificate) {
 		// even though it's called append, it's a new cert instance at every call.
 		return cert
 	}
-	panic("Not a certificate in there")	
+	panic("Not a certificate in there")
 }
