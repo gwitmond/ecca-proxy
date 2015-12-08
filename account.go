@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"crypto/rand"
 	"encoding/base64"
+	"strings"
 )
 
 // This file contains the users' accounts for Ecca.
@@ -59,7 +60,7 @@ var logins = make(map[string] credentials)
 
 // return the credentials that's currently logged in at hostname
 func getLoggedInCreds (host string) (*credentials) {
-	hostname := getHostname(host)
+	hostname := strings.ToLower(getHostname(host))
 	cred, exists := logins[hostname]
 	if exists == false { return nil } // User is not logged in.
 	return &cred
@@ -71,7 +72,7 @@ func getLoggedInCreds (host string) (*credentials) {
 // Limit host to just the hostname, not the host:port
 // So there is only one user logged in at any hostname at a time.
 func login(host string, cred credentials) {
-	hostname := getHostname(host)
+	hostname := strings.ToLower(getHostname(host))
 	logins[hostname] = cred
 	log.Println("logging in ", cred.CN, " at ", hostname)
 }
