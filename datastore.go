@@ -13,7 +13,7 @@ import (
 	"fmt"
 
 	// These are for the data storage
-        "github.com/coopernurse/gorp"
+	"gopkg.in/gorp.v1"
         "database/sql"
         _ "github.com/mattn/go-sqlite3"
 )
@@ -60,7 +60,7 @@ func getCred (hostname string, cn string) (*credentials) {
 	creds, err := getCredentials(hostname, cn)
 	check(err)
 	switch len(creds) {
-	case  0:
+	case 0:
 		return nil
 	case 1:
 		return &creds[0]
@@ -69,7 +69,7 @@ func getCred (hostname string, cn string) (*credentials) {
 }
 
 // getCredentials, all of them, all for a host, or a single one.
-func getCredentials(args... interface{}) ([]credentials, error) {
+func getCredentials(args... interface{}) (creds []credentials, err error) {
         var query string
         switch {
         case len(args) == 0:
@@ -84,15 +84,9 @@ func getCredentials(args... interface{}) ([]credentials, error) {
 
 	query += " ORDER BY hostname, cn"
 
-        creds, err := dbmap.Select(credentials{}, query, args...)
+        _, err = dbmap.Select(&creds, query, args...)
         if err != nil { return nil, err }
-
-	// ugly boilerplate. Can this be done better?
-	var res = make([]credentials, len(creds))
-	for i, e := range creds {
-		res[i] = *e.(*credentials)
-	}
-	return res, nil
+	return // creds
 }
 
 // Listeners
@@ -115,3 +109,31 @@ func getAllListeners () ([]listener, error) {
 	}
 	return res, nil
 }
+
+
+type AllDetails struct {
+	Hostname    string
+	ListenerCN  string
+	CallerCN    *string
+	Application *string
+}
+
+
+// get all details (realms), hosts, accounts, callers, application for all records.
+func getAllDetails() (map[string][]AllDetails) {
+	query := `SELECT cr.hostname AS hostname, cr.cn AS listenerCN,
+                  li.callerCN AS callerCN, li.application AS application
+                  FROM credentials cr LEFT OUTER JOIN listeners li ON cr.cn = li.listenercn
+                  ORDER BY cr.hostname, cr.cn, li.callercn, li.application;`
+	var list []AllDetails
+	_, err := dbmap.Select(&list, query)
+	check(err)
+
+	details := map[string][]AllDetails{}
+	for _, item := range list {
+		hostname := item.Hostname
+		details[hostname] = append(details[hostname],item)
+	}
+	return details
+}
+

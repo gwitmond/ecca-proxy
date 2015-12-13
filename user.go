@@ -286,28 +286,32 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
 `<html>
 <head>
   <style>
-    td { border-bottom: 1px solid gray;}
+    table { border-top: 1px solid gray; border-bottom: 1px solid gray; }
+    tbody tr { background: #eee; }
   </style>
 </head>
 <body>
  <h1>Manage your Eccentric Authentication logins</h1>
  <h3>Current logins</h3>
   {{ if .current }}
-  <p>These are your current logins.
-   <table>
-      <tr><th>Host</th><th>Account</th><th>Action</th></tr>
-    {{range $hostname, $cred := .current }}
-      <tr><td>{{ $hostname }}</td>
-          <td>{{ $cred.CN }}</td>
-          <td>
-            <form method="POST">
-              <input type="hidden" name="logout" value="{{ .Hostname }}">
-              <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-            </form>
-          </td>
-      </tr>
-    {{ end }}
-   </table>
+  <p>
+    <table>
+      <thead><tr><th>Host</th><th>Account</th><th>Action</th></tr></thead>
+      <tbody>
+        {{range $hostname, $cred := .current }}
+          <tr><td>{{ $hostname }}</td>
+              <td>{{ $cred.CN }}</td>
+              <td>
+                <form method="POST">
+                  <input type="hidden" name="logout" value="{{ .Hostname }}">
+                  <input type="submit" name="button" value="Log out of {{ .Hostname }}">
+                </form>
+              </td>
+          </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </p>
  {{ else }}
    <p><em>You are not logged in anywhere.</em></p>
  {{ end }}
@@ -315,21 +319,32 @@ var showLoginTemplate = template.Must(template.New("showLogins").Parse(
  <h3>All your accounts at hosts</h3>
    <p>These are all your accounts we have private keys for.
      <br>You can log in to any. Just click on the host name to get there anonymously.
-     <br>You'll get to choose the account when the sites asks for one.
+     <br>You'll get to choose the account when the sites asks for one.</p>
+     <p>
      <table>
-      <tr><th>Host</th><th>Accounts</th><!-- <th>Show full certificate</th> -->
-      {{range $hostname, $creds := .allCreds }}
+     <thead>
+       <tr><th>Host</th>
+           <th>Accounts</th>
+           <th>Invited</th>
+           <th>App</th>
+           <!-- <th>Show full certificate</th> -->
+       </tr>
+     </thead>
+     <tbody>
+       {{ range $hostname, $details := .alldetails }}
          <tr>
-          <td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
-         <td>{{ range $creds }} {{ .CN }} <br> {{ end }}</td>
-         <!-- <td>{{ range $creds }} <a href="/showcert?cn={{.CN}}@@{{.Hostname}}">show {{.CN}} </a><br> {{ end }}</td> -->
-        </tr>
-
-    {{ else }}
-      <tr><td colspan="2">You have no accounts anywhere. </td></tr>
-    {{ end }}
-    </table>
- </body>
+           <td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
+           <td>{{ range $details }}{{ .ListenerCN        }}<br/>{{ end }}</td>
+           <td>{{ range $details }}{{ or .CallerCN    "" }}<br/>{{ end }}</td>
+           <td>{{ range $details }}{{ or .Application "" }}<br/>{{ end }}</td>
+         </tr>
+       {{ else }}
+         <tr><td colspan="4">You have no accounts anywhere. </td></tr>
+       {{ end }}
+     </tbody>
+     </table>
+   </p>
+</body>
 </html>`))
 
 
@@ -339,10 +354,11 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 
 	switch req.Method {
 	case "GET":
-		creds := mapAllCreds(getAllCreds())
+		details := getAllDetails()
+
 		buf  := execTemplate(showLoginTemplate, "showLogins", map[string]interface{}{
-			"current": logins,
-			"allCreds": creds,
+			"current":    logins,
+			"alldetails": details,
 		})
 		resp := makeResponse(req, 200, "text/html", buf)
 		log.Println("Show logins")
@@ -604,14 +620,6 @@ func startVoiceApp(tlsconn *tls.Conn, remoteCN string){
 // 	return
 // }
 
-func mapAllCreds(allCreds []credentials) (map[string][]credentials) {
-	creds := map[string][]credentials{}
-	for _, cred := range allCreds {
-		hostname := cred.Hostname
-		creds[hostname] = append(creds[hostname], cred)
-	}
-	return creds
-}
 
 //-- utils
 
