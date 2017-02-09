@@ -6,6 +6,12 @@
 *.a
 *.so
 
+# Compiled binary
+ecca-proxy
+
+# Runtime generated files
+ecca-proxy.sqlite3
+
 # Folders
 _obj
 _test
