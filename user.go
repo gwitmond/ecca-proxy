@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"io"
 	"io/ioutil"
+        "os"
 	"strings"
 	"html/template"
 	"crypto/rsa"
@@ -79,6 +80,46 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 	}
 	log.Printf("Unexpected request: %#v\n", req)
 	return nil, nil
+}
+
+func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+        var path = req.URL.Path
+        log.Println("path is: ", path)
+	req.ParseForm()
+	log.Printf("Form parameters are: %v\n", req.Form)
+	var staticFile = req.Form.Get("file")
+	log.Println("got param (file): ", staticFile)
+
+	switch req.Method {
+	case "GET":
+
+                file, err := openFromStaticWhitelist(staticFile)
+                if err != nil {
+                  log.Printf("error opening ", err)
+                  return nil, nil
+                }
+
+                buf := bytes.NewBuffer(nil)
+                n, err := buf.ReadFrom(file)
+                if err != nil {
+                  log.Fatal("error reading ", err)
+                }
+
+                log.Printf("read some bytes: ", n)
+		resp := makeResponse(req, 200, "text/css", buf)
+		return nil, resp
+	}
+	log.Printf("Unexpected method: %#v", req.Method)
+	return nil, nil
+}
+
+func openFromStaticWhitelist(staticFileName string) (*os.File, error) {
+
+        switch staticFileName {
+        case "css/bootstrap.min.css":
+                return os.Open("./static/css/bootstrap.min.css")
+        }
+        return nil, errors.New("No valid static filename given")
 }
 
 // uses the name to render "templates/`name`.html"
