@@ -31,10 +31,14 @@ import (
 var registerURLmap = map[string]string{}
 
 var port = flag.Int("p", 8000, "port to listen to")
+var ip4ListenAddr = flag.String("4", "127.0.0.1", "IPv4 address to listen on")
+var ip6ListenAddr = flag.String("6", "[::1]", "IPv6 address to listen on")
+
 var verbose = flag.Bool("v", true, "should every proxy request be logged to stdout")
 //var registryUrl = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1024/", "The Registry of (dis)honesty to query for duplicate certificates.")
 var datastore = flag.String("datastore", "ecca-proxy.sqlite3", "The location where to store the identities and invitations")
 var torSocksPort = flag.String("torsocks", "127.0.0.1:9050", "The address of the TorSocks port to connect to for outbound connections")
+
 
 func main() {
 	flag.Parse()
@@ -63,21 +67,21 @@ func main() {
 
 	restartAllTorListeners()
 
-	log.Printf("Starting proxy access at [::1]:%d and at 127.0.0.1:%d\n", *port, *port)
+	log.Printf("Starting proxy access at %s:%d and at %s:%d\n", *ip6ListenAddr, *port, *ip4ListenAddr, *port)
 	log.Printf("Configure your browser to use one of those as http-proxy.\n")
-	log.Printf("Then browse to http://dating.wtmnd.nl:10443/\n")
+	log.Printf("Then browse to http://dating.wtmnd.nl/\n")
 	log.Printf("Use http (not https) to benefit from this proxy.\n")
 	log.Printf("For assistence, please see: http://eccentric-authentication.org/contact.html\n")
 
 	server6 := &http.Server {
-		Addr: fmt.Sprintf("[::1]:%d", *port),
+		Addr: fmt.Sprintf("%s:%d", *ip6ListenAddr, *port),
 		Handler: proxy,
 	}
 	// TODO: disable KeepAlives when your golang version supports it
 	//server6.SetKeepAlivesEnabled(false)
 
 	server4 := &http.Server {
-		Addr: fmt.Sprintf("127.0.0.1:%d", *port),
+          Addr: fmt.Sprintf("%s:%d", *ip4ListenAddr, *port),
 		Handler: proxy,
 	}
 	// TODO: disable KeepAlives when your golang version supports it
