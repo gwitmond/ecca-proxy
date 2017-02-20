@@ -51,9 +51,9 @@ func main() {
 	// This handler sends a response to the client, never upstream.
 	proxy.OnRequest(goproxy.DstHostIs(eccaHandlerHost)).DoFunc(eccaHandler)
 
-	// All other requests (where the user want to go to) are handled here.
+	// All other requests (where the user wants to go to) are handled here.
 	// When this needs an account, it redirects the client to the eccaHandler above.
-	proxy.OnRequest().DoFunc(eccaProxy)
+	proxy.OnRequest(goproxy.Not(goproxy.DstHostIs(eccaHandlerHost))).DoFunc(eccaProxy)
 
 
 	// Decode any messages when we have the "Eccentric-Authentication" header set to "decrypt"
