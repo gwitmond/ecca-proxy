@@ -32,6 +32,7 @@ import (
 	MathRand   "math/rand"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 	"github.com/gwitmond/socks4a"
+        "github.com/GeertJohan/go.rice"
 )
 
 // Global config
