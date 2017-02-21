@@ -25,3 +25,6 @@ clean:
 
 distclean: clean
 	rm -f ecca-proxy.sqlite3
+
+run: ecca-proxy
+	./ecca-proxy -v
