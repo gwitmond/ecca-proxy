@@ -18,7 +18,6 @@ import (
 	"net/url"
 	"io"
 	"io/ioutil"
-        "os"
 	"strings"
 	"html/template"
 	"crypto/rsa"
@@ -58,44 +57,6 @@ func redirectToSelector(req *http.Request) (*http.Response) {
 // We show a simple form with the available credentials and allow the option to
 // create a new one.
 
-var selectTemplate = template.Must(template.New("select").Parse(
-`<html>
-<body>
-<h1>401 - Eccentric Authentication required</h1>
-<form method="POST" >
-<p>Please select one of these identies {{ range . }} <input type="submit" name="login" value="{{ .CN }}">{{ else }} -none- {{ end }}<br>
-<p>Or create a new one</p>
-<input type="text" name="cn"><input type="submit" name="register" value="Register this name"></p><br>
-<p>Or register anonymously: <input type="submit" name="anonymous" value="Anonymous"></p>
-</form>
-</body>
-</html>`))
-
-var embedTemplate = template.Must(template.New("embed").Parse(
-`<html>
-
-<body>
-  <p>Ecca Proxy. You are logged in {{ .Hostname }} with {{ .CN }}.
-     Press here to logout:
-      <form method="POST" action="/manage">
-        <input type="hidden" name="logout" value="{{ .Hostname }}">
-        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-      </form></p>
-<p>Click here to go to the <a href="/manage">management page</a> of the proxy</p>
-<hr>
-  <iframe src="{{ .URL }}" width="100%" height="100%">
-    [Your user agent does not support frames or is currently configured
-     not to display frames.
-     However, you may visit <a href="{{ .URL }}">{{ .URL }}</a>.
-     <br>
-     To log out:
-      <form method="POST" action="/manage">
-        <input type="hidden" name="logout" value="{{ .Hostname }}">
-        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-       </form>]
-  </iframe>
-</body>
-</html>`))
 
 // eccaHandler: learn the users' selected account and set it as logged in.
 // then redirect to original request (where the user want to go to)/
@@ -131,18 +92,11 @@ func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *
 	case "GET":
 
                 file, err := openFromStaticWhitelist(staticFile)
-                if err != nil {
-                  log.Printf("error opening ", err)
-                  return nil, nil
-                }
-
-                buf := bytes.NewBuffer(nil)
-                n, err := buf.ReadFrom(file)
+                buf := bytes.NewBuffer(file)
                 if err != nil {
                   log.Fatal("error reading ", err)
                 }
 
-                log.Printf("read some bytes: ", n)
 		resp := makeResponse(req, 200, "text/css", buf)
 		return nil, resp
 	}
@@ -150,15 +104,34 @@ func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *
 	return nil, nil
 }
 
-func openFromStaticWhitelist(staticFileName string) (*os.File, error) {
+func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
+
+        var staticDir = rice.MustFindBox("./static")
 
         switch staticFileName {
-        case "css/bootstrap.min.css":
-                return os.Open("./static/css/bootstrap.min.css")
+        case
+              "css/bootstrap.min.css",
+              "js/bootstrap.min.js",
+              "js/tether.min.js",
+              "js/jquery-3.1.1.slim.min.js":
+                return staticDir.Bytes(staticFileName)
         }
         return nil, errors.New("No valid static filename given")
 }
 
+// uses the name to render "templates/`name`.html"
+// this adds the boilerplate of head.html and navbar.html
+func constructTemplate(name string) (*template.Template) {
+
+        var templateDir = rice.MustFindBox("./templates")
+
+        var filename = name+".html"
+        var templatestring = templateDir.MustString(filename)
+        var templ = template.Must(template.New(name).Parse(templatestring))
+        templ.Parse(templateDir.MustString("navbar.html"))
+        templ.Parse(templateDir.MustString("head.html"))
+        return templ
+}
 
 func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	var originalURL *url.URL
@@ -177,6 +150,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		// User has no active logins.
 		// Show available client certificates for URI.Host
 		creds := getCreds(originalURL.Host)
+                var selectTemplate = constructTemplate("select")
 		buf := execTemplate(selectTemplate, "select", creds)
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
@@ -215,6 +189,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 			"CN": cred.CN,
 			"URL": originalURL.String(),
 		}
+                var embedTemplate = constructTemplate("embed")
 		buf := execTemplate(embedTemplate, "embed", data)
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
@@ -326,72 +301,6 @@ func signupPubkey(client *http.Client, registerURL string, cn string, pub rsa.Pu
 //------------------ Manager
 // show current logins and allow for logouts.
 
-var showLoginTemplate = template.Must(template.New("showLogins").Parse(
-`<html>
-<head>
-  <style>
-    table { border-top: 1px solid gray; border-bottom: 1px solid gray; }
-    tbody tr { background: #eee; }
-  </style>
-</head>
-<body>
- <h1>Manage your Eccentric Authentication logins</h1>
- <h3>Current logins</h3>
-  {{ if .current }}
-  <p>
-    <table>
-      <thead><tr><th>Host</th><th>Account</th><th>Action</th></tr></thead>
-      <tbody>
-        {{range $hostname, $cred := .current }}
-          <tr><td>{{ $hostname }}</td>
-              <td>{{ $cred.CN }}</td>
-              <td>
-                <form method="POST">
-                  <input type="hidden" name="logout" value="{{ .Hostname }}">
-                  <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-                </form>
-              </td>
-          </tr>
-        {{ end }}
-      </tbody>
-    </table>
-  </p>
- {{ else }}
-   <p><em>You are not logged in anywhere.</em></p>
- {{ end }}
-
- <h3>All your accounts at hosts</h3>
-   <p>These are all your accounts we have private keys for.
-     <br>You can log in to any. Just click on the host name to get there anonymously.
-     <br>You'll get to choose the account when the sites asks for one.</p>
-     <p>
-     <table>
-     <thead>
-       <tr><th>Host</th>
-           <th>Accounts</th>
-           <th>Invited</th>
-           <th>App</th>
-           <!-- <th>Show full certificate</th> -->
-       </tr>
-     </thead>
-     <tbody>
-       {{ range $hostname, $details := .alldetails }}
-         <tr>
-           <td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
-           <td>{{ range $details }}{{ .ListenerCN        }}<br/>{{ end }}</td>
-           <td>{{ range $details }}{{ or .CallerCN    "" }}<br/>{{ end }}</td>
-           <td>{{ range $details }}{{ or .Application "" }}<br/>{{ end }}</td>
-         </tr>
-       {{ else }}
-         <tr><td colspan="4">You have no accounts anywhere. </td></tr>
-       {{ end }}
-     </tbody>
-     </table>
-   </p>
-</body>
-</html>`))
-
-
 func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	req.ParseForm()
 	log.Printf("Form parameters are: %v\n", req.Form)
@@ -400,6 +309,7 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 	case "GET":
 		details := getAllDetails()
 
+                var showLoginTemplate = constructTemplate("showLogins")
 		buf  := execTemplate(showLoginTemplate, "showLogins", map[string]interface{}{
 			"current":    logins,
 			"alldetails": details,
