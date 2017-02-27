@@ -2,29 +2,74 @@
 <html>
   {{template "head"}}
   <body>
-    {{template "navbar" }}
     <div class="container">
-      <h1>401 - Eccentric Authentication required</h1>
-      <form method="POST" >
-	<div class="form-group">
-	  <p>Please select one of these identies</p>
-	  {{ range . }}
-	  <input type="submit" name="login" value="{{ .CN }}">
-	  {{ else }}
-	  <h3> No identities available </h3>
-	  {{ end }}
-	  <br>
-	</div>
-	<div class="form-group">
-	  <p>Or create a new one</p>
-	  <input type="text" name="cn" class="form-control">
-	  <input type="submit" name="register" value="Register this name">
-	  <br>
-	</div>
-	<div class="form-group">
-	  <p>Or register anonymously:</p>
-	  <input type="submit" name="anonymous" value="Anonymous">
-	</div>
+      {{template "navbar" }}
+      <form method="POST">
+        <div class="row">
+          <div class="col-md-6 col-sm-12">
+            <div class="row text-center">
+              <div class="col">
+                {{if gt (len $) 0 }}
+                <h3>Use an existing identity</h3>
+                {{else}}
+                <h3>No existing identities</h3>
+                {{end}}
+              </div>
+            </div>
+            {{ range $i, $x := $ }}
+            {{ $name := printf "%.25s" $x.CN }}
+            <div class="jumbotron m-3 p-2">
+              <div class="row">
+                <div class="col">
+                  <input type="hidden" name="login" value="{{$x.CN}}"/>
+                  <button type="submit"
+                  class="btn btn-info btn-block"
+                  >
+                  {{ $name }}{{ if gt (len $x.CN) 25}}{{"..."}}{{end}}
+                </button>
+                </div>
+              </div>
+            </div>
+            {{else}}
+            <div class="col mx-0">
+                <div class="jumbotron my-3 mx-0 p-2">
+                  <p>
+                    You do not have any identities with this website, please create one with the menu on the right.
+                  </p>
+                  <p>
+
+                  </p>
+                </div>
+              </div>
+            {{end}}
+          </div>
+          <div class="col-sm-12 col-md-6">
+            <div class="row text-center">
+              <div class="col">
+                <h3>Create a new identity</h3>
+              </div>
+            </div>
+            <div class="row text-center mt-3">
+              <div class="form-group" style="width:100%">
+                <div class="form-inline" style="width:100%">
+                  <label for="new_name" class="sr-only">Choose your own name</label>
+                  <div class="input-group" style="width:100%">
+                    <input type="text" class="form-control" placeholder="Choose your own name">
+                    <span class="input-group-btn">
+                      <button class="btn btn-outline-primary" type="submit" style="width:auto;">Register this name</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="row text-center">
+              <div class="form-group" style="width:100%">
+                <label for="register_anonymous" class="sr-only">Or register anonymously:</label>
+                <input type="submit" name="anonymous" value="Or register anonymously" id="register_anonymous" class="form-control btn btn-outline-warning">
+              </div>
+            </div>
+          </div>
+        </div>
       </form>
     </div>
   </body>
