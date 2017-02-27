@@ -24,6 +24,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"time"
 	"os/exec"
 	"strconv"
 	"regexp"
@@ -119,6 +120,10 @@ func constructTemplate(name string) (*template.Template) {
 		"mod": func(a int, b int) int {
 			return a % b
 		},
+		"unixToDateTime": func(timestamp int64) string {
+			return time.Unix(timestamp, 0).Format("Monday 02 January 2006 15:04")
+		},
+
 	}
 
 
@@ -278,12 +283,15 @@ func registerCN(hostname string, cn string) (*credentials, error) {
 
 	var privPEM  bytes.Buffer
 	pem.Encode(&privPEM, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+
 	creds := credentials{
 		Hostname: hostname,
 		Realm: "",
 		CN: cn,
 		Cert: cert,
 		Priv: privPEM.Bytes(),
+		Created: time.Now().Unix(),
+		LastUsed: time.Now().Unix(), // user is logged-in immedeatly
 	}
 	// Register the data and set it as login certificate
 	// It's what the user would expect from signup.
