@@ -29,6 +29,18 @@
                 </button>
                 </div>
               </div>
+              <div class="row">
+                <div class="col-sm-6">
+                  <label for="created-date-{{$x.CN}}" class="small">Created:</label>
+                  <div id="created-date-{{$x.CN}}" class="small">{{ unixToDateTime $x.Created}}</div>
+                </div>
+                <div class="col-sm-6">
+                  <label for="last-used-date-{{$x.CN}}" class="small">Last Used:</label>
+                  <div id="last-used-date-{{$x.CN}} small" class="small">
+                    {{ if $x.LastUsed }}{{ unixToDateTime $x.LastUsed}}{{ else }}Never{{end}}
+                  </div>
+                </div>
+              </div>
             </div>
             {{else}}
             <div class="col mx-0">

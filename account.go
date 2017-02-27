@@ -45,11 +45,14 @@ func getServerCreds (realm string) (serverCert, bool) {
 
 //-------------------- client data
 type credentials struct {
+	Id	 int64		 // for the database
 	Hostname string          // the hostname
 	Realm    string          // the realm for these credentials.  (The part after the @@? )
 	CN       string          // the username
 	Cert     []byte          // the client certificate without private key
 	Priv     []byte          // the private key that matches the certificate.
+	Created  int64		 // unix timestamp due to DB driver (gorp)
+	LastUsed int64		 // unix timestamp due to DB driver (gorp)
 }
 
 //-------------------- Logins
@@ -75,6 +78,7 @@ func login(host string, cred credentials) {
 	hostname := strings.ToLower(getHostname(host))
 	logins[hostname] = cred
 	log.Println("logging in ", cred.CN, " at ", hostname)
+	updateLastUsedTime(cred)
 }
 
 func logout(host string) {
