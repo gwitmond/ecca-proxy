@@ -4,9 +4,9 @@
   <body>
     <div class="container">
       {{template "navbar" }}
-      <form method="POST">
-        <div class="row">
-          <div class="col-md-6 col-sm-12">
+      <div class="row">
+        <div class="col-md-6 col-sm-12">
+          <form method="POST">
             <div class="row text-center">
               <div class="col">
                 {{if gt (len $) 0 }}
@@ -23,10 +23,10 @@
                 <div class="col">
                   <input type="hidden" name="login" value="{{$x.CN}}"/>
                   <button type="submit"
-                  class="btn btn-info btn-block"
-                  >
-                  {{ $name }}{{ if gt (len $x.CN) 25}}{{"..."}}{{end}}
-                </button>
+                    class="btn btn-info btn-block"
+                    >
+                    {{ htmlescape $name }}{{ if gt (len $x.CN) 25}}{{"..."}}{{end}}
+                  </button>
                 </div>
               </div>
               <div class="row">
@@ -41,21 +41,30 @@
                   </div>
                 </div>
               </div>
-            </div>
-            {{else}}
-            <div class="col mx-0">
-                <div class="jumbotron my-3 mx-0 p-2">
+              <div class="row">
+                <div class="col-sm-6">
                   <p>
-                    You do not have any identities with this website, please create one with the menu on the right.
-                  </p>
-                  <p>
-
+                    {{ htmlescape $x.Comment }}
                   </p>
                 </div>
               </div>
+            </div>
+            {{else}}
+            <div class="col mx-0">
+              <div class="jumbotron my-3 mx-0 p-2">
+                <p>
+                  You do not have any identities with this website, please create one with the menu on the right.
+                </p>
+                <p>
+
+                </p>
+              </div>
+            </div>
             {{end}}
-          </div>
-          <div class="col-sm-12 col-md-6">
+          </form>
+        </div>
+        <div class="col-sm-12 col-md-6">
+          <form method="POST">
             <div class="row text-center">
               <div class="col">
                 <h3>Create a new identity</h3>
@@ -66,7 +75,7 @@
                 <div class="form-inline" style="width:100%">
                   <label for="new_name" class="sr-only">Choose your own name</label>
                   <div class="input-group" style="width:100%">
-                    <input type="text" class="form-control" placeholder="Choose your own name">
+                    <input type="text" class="form-control" placeholder="Choose your own name" name="register">
                     <span class="input-group-btn">
                       <button class="btn btn-outline-primary" type="submit" style="width:auto;">Register this name</button>
                     </span>
@@ -80,9 +89,13 @@
                 <input type="submit" name="anonymous" value="Or register anonymously" id="register_anonymous" class="form-control btn btn-outline-warning">
               </div>
             </div>
+            <div class="row text-center">
+              <label for="account_notes" class="sr-only">Add a note to the new account:</label>
+              <textarea name="comment" placeholder="Add optional notes to your account (for your eyes only)  e.g. this account will only be used on every tuesday" id="account_notes" class="form-control" rows="5"></textarea>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   </body>
 </html>
