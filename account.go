@@ -51,6 +51,7 @@ type credentials struct {
 	CN       string          // the username
 	Cert     []byte          // the client certificate without private key
 	Priv     []byte          // the private key that matches the certificate.
+	Comment  string          // notes the user can add to the account
 	Created  int64		 // unix timestamp due to DB driver (gorp)
 	LastUsed int64		 // unix timestamp due to DB driver (gorp)
 }
