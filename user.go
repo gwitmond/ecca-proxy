@@ -26,10 +26,8 @@ import (
 	"encoding/pem"
 	"time"
 	"os/exec"
-	"strconv"
 	"regexp"
 	CryptoRand "crypto/rand"
-	MathRand   "math/rand"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 	"github.com/gwitmond/socks4a"
         "github.com/GeertJohan/go.rice"
@@ -105,6 +103,8 @@ func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
 		case
 		"css/bootstrap.min.css",
 		"js/bootstrap.min.js",
+		"js/script.js",
+		"js/adjectives_nouns.js",
 		"js/tether.min.js",
 		"js/jquery-3.1.1.slim.min.js":
 		return staticDir.Bytes(staticFileName)
@@ -187,11 +187,6 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 
 		comment := req.Form.Get("comment")
 
-		if req.Form.Get("anonymous") != "" {
-			// register with random cn
-			cred, err = registerAnonymous(originalURL.Host, comment)
-		}
-
 		if req.Form.Get("register") != "" {
 			// register with given cn
 			cn := req.Form.Get("register")
@@ -228,15 +223,6 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 	}
 	log.Printf("Unexpected method: %#v", req.Method)
 	return nil, nil
-}
-
-
-// Register an anonymous account at the registerURL in the serverCredentials for hostname.
-// Set serverCAcert from the caPEM field.
-func registerAnonymous(hostname string, comment string) (*credentials, error) {
-	// create a unique userid
-	cn := "anon-" + strconv.Itoa(int(MathRand.Int31()))
-	return registerCN(hostname, cn, comment)
 }
 
 
