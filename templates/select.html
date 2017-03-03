@@ -4,7 +4,14 @@
   <body>
     <div class="container">
       {{template "navbar" . }}
-      <div class="row mt-3">
+      <div class="row my-3">
+        {{if .Hostname }}
+        <div class="col text-center">
+          <h1>{{ .Hostname }}</h1>
+        </div>
+      </div>
+      <div class="row">
+        {{end}}
         <div class="col-md-6 col-sm-12" style="overflow:hidden;">
           <form method="POST" style="overflow:hidden;">
             <div class="row text-center">
@@ -16,7 +23,7 @@
                 {{end}}
               </div>
             </div>
-            {{ range $i, $x := $ }}
+            {{ range $i, $x := .Creds }}
             {{ $name := printf "%.25s" $x.CN }}
             <div class="jumbotron m-3 p-2">
               <div class="row">
