@@ -123,6 +123,7 @@ func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
 	switch staticFileName {
 		case
 		"css/bootstrap.min.css",
+		"css/style.css",
 		"js/bootstrap.min.js",
 		"js/script.js",
 		"js/adjectives_nouns.js",
