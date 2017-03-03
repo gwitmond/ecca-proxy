@@ -178,7 +178,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		// Show available client certificates for URI.Host
 		creds := getCreds(originalURL.Host)
 		var selectTemplate = constructTemplate("select")
-		buf := execTemplate(selectTemplate, "select", creds)
+		buf := execTemplate(selectTemplate, "select", map[string]interface{}{"Creds": creds, "Hostname": originalURL.Host})
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
 	case "POST":
@@ -210,7 +210,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		// embed the original site in an iframe in our management frame.
 
 		originalURL.Scheme = "http" // send users follow up requests back to us
-		var data = map[string]string {
+		var data = map[string]interface{} {
 			"Hostname": originalURL.Host,
 			"CN": cred.CN,
 			"URL": originalURL.String(),
@@ -629,8 +629,9 @@ func makeResponse(req *http.Request, code int, contType string, buf *bytes.Buffe
 }
 
 
-func execTemplate(template *template.Template, name string, data interface{}) (*bytes.Buffer) {
+func execTemplate(template *template.Template, name string, data map[string]interface{}) (*bytes.Buffer) {
 	buf := new(bytes.Buffer)
+	data["Page"] = name
 	err := template.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		log.Fatal("error executing template: ", err)
