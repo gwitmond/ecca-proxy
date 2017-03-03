@@ -3,10 +3,10 @@
   {{template "head"}}
   <body>
     <div class="container">
-      {{template "navbar" }}
-      <div class="row">
-        <div class="col-md-6 col-sm-12">
-          <form method="POST">
+      {{template "navbar" . }}
+      <div class="row mt-3">
+        <div class="col-md-6 col-sm-12" style="overflow:hidden;">
+          <form method="POST" style="overflow:hidden;">
             <div class="row text-center">
               <div class="col">
                 {{if gt (len $) 0 }}
@@ -56,7 +56,6 @@
                   You do not have any identities with this website, please create one with the menu on the right.
                 </p>
                 <p>
-
                 </p>
               </div>
             </div>
@@ -86,7 +85,7 @@
             <div class="row text-center pr-3">
               <div class="form-group" style="width:100%">
                 <label for="register_anonymous" class="sr-only">Or generate a random name:</label>
-		<button type="button"value="" id="register_anonymous" class="form-control btn btn-outline-warning" onclick="generateRandomName()">Or generate a random name</button>
+                <button type="button"value="" id="register_anonymous" class="form-control btn btn-outline-warning" onclick="generateRandomName()">Or generate a random name</button>
               </div>
             </div>
             <div class="row text-center pr-3">

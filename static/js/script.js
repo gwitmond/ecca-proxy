@@ -23,3 +23,7 @@ function generateRandomName() {
 	var generated_name = adjectives[adjective_index] + "-" + nouns[noun_index];
 	document.getElementById("register_name").setAttribute("value", generated_name);
 }
+
+function hideAccountHandler(){
+  document.getElementById('embed-root').setAttribute('hidden', true);
+}
