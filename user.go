@@ -147,7 +147,6 @@ func constructTemplate(name string) (*template.Template) {
 		"unixToDateTime": func(timestamp int64) string {
 			return time.Unix(timestamp, 0).Format("Monday 02 January 2006 15:04")
 		},
-
 	}
 
 
@@ -215,6 +214,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 			"Hostname": originalURL.Host,
 			"CN": cred.CN,
 			"URL": originalURL.String(),
+			"Comment": cred.Comment,
 		}
 		var embedTemplate = constructTemplate("embed")
 		buf := execTemplate(embedTemplate, "embed", data)
