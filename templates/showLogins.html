@@ -1,68 +1,113 @@
 <!DOCTYPE html>
 <html>
   <body>
-    <div class="container">
-      <div class="row">
-      <div class="col">
-        <h1>Manage your Eccentric Authentication logins</h1>
+    <div class="container-fluid">
+      {{ template "navbar" . }}
+      <div class="row mt-3">
+        <div class="col text-center">
+          <h1>Manage your Eccentric Authentication logins</h1>
+        </div>
       </div>
-      </div>
-      <div class="row">
+      <div class="row pt-4">
         <div class="col-md-6">
-          <h3>Current logins</h3>
-          {{ if .current }}
-          <p>
-          <table class="table">
-            <thead><tr><th>Host</th><th>Account</th><th>Action</th></tr></thead>
-            <tbody>
-              {{range $hostname, $cred := .current }}
-              <tr><td>{{ $hostname }}</td>
-                <td>{{ $cred.CN }}</td>
-                <td>
-                  <form method="POST">
-                    <input type="hidden" name="logout" value="{{ .Hostname }}">
-                    <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-                  </form>
-                </td>
-              </tr>
-              {{ end }}
-            </tbody>
-          </table>
-          </p>
-          {{ else }}
-          <p><em>You are not logged in anywhere.</em></p>
-          {{ end }}
+          <div class="row m-2">
+            <div class="col">
+              <h3>Current logins</h3>
+              <p>These are all your accounts that you are currently logged into.
+              Click on the account name or the hostname to visit the host.</p>
+            </div>
+          </div>
+          {{if .current }}
+          <div class="row mt-5">
+            {{range $hostname, $cred := .current }}
+            {{ $name := printf "%.25s" $cred.CN }}
+            <div class="col col-md-10 text-center mx-5 my-2">
+                <form method="POST" class="">
+                  <div class="input-group btn-group">
+                    <a href="http://{{$hostname}}/" class="btn btn-primary btn-block hidden-md-down">{{$name}}</a>
+                    <a href="http://{{$hostname}}/" class="btn btn-secondary btn-block m-0 hidden-md-down">{{$hostname}}</a>
+                    <div class="btn-group-vertical hidden-lg-up btn-block my-0">
+                      <a href="http://{{$hostname}}/" class="btn btn-primary btn-block m-0 hidden-lg-up" style="border-radius:4px 0 0 0">{{$name}}</a>
+                      <a href="http://{{$hostname}}/" class="btn btn-secondary btn-block m-0 hidden-lg-up" style="border-radius: 0 0 0 4px">{{$hostname}}</a>
+                    </div>
+                  <button type="submit" class="btn btn-outline-danger">log out</button>
+                  </div>
+                  <input type="hidden" name="logout" value="{{$hostname}}"/>
+                </form>
+            </div>
+            {{end}}
+          </div>
+          {{else}}
+          <div class="row">
+            <div class="col text-center">
+              <h4 class="text-muted"><em>Not logged in anywhere</em></h4>
+            </div>
+          </div>
+          {{end}}
         </div>
 
+        <hr/>
         <div class="col-md-6">
-          <h3>All your accounts at hosts</h3>
-          <p>These are all your accounts we have private keys for.
-          <br>You can log in to any. Just click on the host name to get there anonymously.
-          <br>You'll get to choose the account when the sites asks for one.</p>
-          <p>
-          <table class="table">
-            <thead>
-              <tr><th>Host</th>
-                <th>Accounts</th>
-                <th>Invited</th>
-                <th>App</th>
-                <!-- <th>Show full certificate</th> -->
-              </tr>
-            </thead>
-            <tbody>
-              {{ range $hostname, $details := .alldetails }}
-              <tr>
-                <td class="text-center"><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
-                <td><div class="row">{{ range $details }}<div class="col">{{ .ListenerCN }}</div>{{ end }}</div></td>
-                <td>{{ range $details }}{{ or .CallerCN    "" }}<br/>{{ end }}</td>
-                <td>{{ range $details }}{{ or .Application "" }}<br/>{{ end }}</td>
-              </tr>
-              {{ else }}
-              <tr><td colspan="4">You have no accounts anywhere. </td></tr>
-              {{ end }}
-            </tbody>
-          </table>
-          </p>
+          <div class="row m-2 text-center">
+            <div class="col">
+              <h3>All your accounts at hosts</h3>
+              <p>These are all your hosts with accounts we have private keys for.
+              <br>You can log in to any. Just click on the host name to get there anonymously.
+              <br>You'll get to choose the account when the sites asks for one.
+              <br> click on the arrow to view the accounts for a host.</p>
+            </div>
+          </div>
+          {{ range $hostname, $details := .alldetails }}
+          <div class="row m-2 text-center">
+            <div class="col">
+              <div class="btn-group btn-block">
+                <a type="button" class="btn btn-primary btn-block" href="http://{{$hostname}}/">{{$hostname}}</a>
+                <button type="button" class="btn btn-secondary btn-block dropdown-toggle m-0 hidden-md-down" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                  {{len $details}}&nbsp;<span class="hidden-md-down">{{if eq (len $details) 1}}account{{else}}accounts{{end}}</span>
+                </button>
+                <button type="button" class="btn btn-secondary dropdown-toggle m-0 hidden-lg-up" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                  {{len $details}}&nbsp;<span class="hidden-md-down">{{if eq (len $details) 1}}account{{else}}accounts{{end}}</span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-right px-3" style="width:100%">
+                  <div class="row">
+                    <div class="col-md-8 col-xs-12">
+                      <div class="dropdown-header">Username</div>
+                    </div>
+                    <div class="col-md-2 text-center hidden-md-down">
+                      <div class="dropdown-header">Chat</div>
+                    </div>
+                    <div class="col-md-2 text-center hidden-md-down">
+                      <div class="dropdown-header">Call</div>
+                    </div>
+                  </div>
+                  {{ range $details }}
+                  <div class="row">
+                    <div class="col-md-8 col-xs-12">
+                      <a class="dropdown-item">{{.ListenerCN}}</a>
+                    </div>
+                    <div class="col-md-2 text-center hidden-md-down">
+                      {{ if (isEq .Application "chat") }}
+                      <img src="/static?file=img/Message-clouds-icon.png" style="height:2em;" />
+                      {{end}}
+                    </div>
+                    <div class="col-md-2 text-center hidden-md-down">
+                      {{ if (isEq .Application "call") }}
+                      <img src="/static?file=img/Call-incoming-icon.png" style="height:2em;"/>
+                      {{end}}
+                    </div>
+                  </div>
+                  {{end}}
+                </div>
+              </div>
+            </div>
+          </div>
+          {{ else }}
+          <div class="row">
+            <div class="col">
+              You have no accounts anywhere.
+            </div>
+          </div>
+          {{ end }}
         </div>
       </div>
     </div>

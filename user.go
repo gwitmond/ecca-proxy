@@ -89,6 +89,13 @@ func getContentType(staticFileName string) string {
 		contentType = "text/css"
 	case "js/":
 		contentType = "text/javascript"
+	case "img":
+		switch staticFileName[len(staticFileName)-3:] {
+		case "png":
+			contentType = "image/png"
+		default:
+			contentType = "image/unknown"
+		}
 	default:
 		contentType = "text/plain"
 	}
@@ -103,6 +110,8 @@ func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
 		case
 		"css/bootstrap.min.css",
 		"css/style.css",
+		"img/Message-clouds-icon.png",
+		"img/Call-incoming-icon.png",
 		"js/bootstrap.min.js",
 		"js/script.js",
 		"js/adjectives_nouns.js",
@@ -123,6 +132,12 @@ func constructTemplate(name string) (*template.Template) {
 		},
 		"unixToDateTime": func(timestamp int64) string {
 			return time.Unix(timestamp, 0).Format("Monday 02 January 2006 15:04")
+		},
+		"isEq": func(a *string, b string) bool {
+			if a == nil {
+				return false
+			}
+			return *a == b
 		},
 	}
 
