@@ -53,7 +53,8 @@ func main() {
 
 	// All other requests (where the user want to go to) are handled here.
 	// When this needs an account, it redirects the client to the eccaHandler above.
-	proxy.OnRequest().DoFunc(eccaProxy)
+	// N.B. Not(DstHostIs(eccaHandlerHost)) is to make sure that internal requests are not handled here as well
+	proxy.OnRequest(goproxy.Not(goproxy.DstHostIs(eccaHandlerHost))).DoFunc(eccaProxy)
 
 
 	// Decode any messages when we have the "Eccentric-Authentication" header set to "decrypt"
@@ -81,7 +82,7 @@ func main() {
 	//server6.SetKeepAlivesEnabled(false)
 
 	server4 := &http.Server {
-          Addr: fmt.Sprintf("%s:%d", *ip4ListenAddr, *port),
+		Addr: fmt.Sprintf("%s:%d", *ip4ListenAddr, *port),
 		Handler: proxy,
 	}
 	// TODO: disable KeepAlives when your golang version supports it

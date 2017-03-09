@@ -1,0 +1,20 @@
+<html>
+  {{ template "head" }}
+  <body id="embed-body" class="p-0 m-0">
+    <div class="container-fluid p-0" id="embed-root">
+      {{template "navbar" . }}
+    </div>
+    <div class="box"></div>
+    <iframe src="{{ .URL }}">
+      [Your user agent does not support frames or is currently configured
+      not to display frames.
+      However, you may visit <a href="{{ .URL }}" target="_blank">{{ .URL }}</a> where you will be logged-in.
+      <br>
+      To log out click the following button or go to <a href="http://ecca.handler/manage">http://ecca.handler/manage</a>:
+      <form method="POST" action="/manage">
+        <input type="hidden" name="logout" value="{{ .Hostname }}">
+        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
+      </form>]
+    </iframe>
+  </body>
+</html>

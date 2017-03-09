@@ -24,13 +24,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"time"
+	"html"
 	"os/exec"
-	"strconv"
 	"regexp"
 	CryptoRand "crypto/rand"
-	MathRand   "math/rand"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 	"github.com/gwitmond/socks4a"
+        "github.com/GeertJohan/go.rice"
 )
 
 // Global config
@@ -38,6 +39,7 @@ var eccaHandlerHost = "ecca.handler"
 var eccaHandlerPath = "/select"
 var eccaManagerPath = "/manage"
 var eccaShowCertPath= "/showcert"
+var eccaStaticPath  = "/static"
 //var eccaDirectConnectionPath= "/direct-connection"
 var eccaDialDirectConnectionPath= "/dial-direct-connection"
 
@@ -55,44 +57,6 @@ func redirectToSelector(req *http.Request) (*http.Response) {
 // We show a simple form with the available credentials and allow the option to
 // create a new one.
 
-var selectTemplate = template.Must(template.New("select").Parse(
-`<html>
-<body>
-<h1>401 - Eccentric Authentication required</h1>
-<form method="POST" >
-<p>Please select one of these identies {{ range . }} <input type="submit" name="login" value="{{ .CN }}">{{ else }} -none- {{ end }}<br>
-<p>Or create a new one</p>
-<input type="text" name="cn"><input type="submit" name="register" value="Register this name"></p><br>
-<p>Or register anonymously: <input type="submit" name="anonymous" value="Anonymous"></p>
-</form>
-</body>
-</html>`))
-
-var embedTemplate = template.Must(template.New("embed").Parse(
-`<html>
-
-<body>
-  <p>Ecca Proxy. You are logged in {{ .Hostname }} with {{ .CN }}.
-     Press here to logout:
-      <form method="POST" action="/manage">
-        <input type="hidden" name="logout" value="{{ .Hostname }}">
-        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-      </form></p>
-<p>Click here to go to the <a href="/manage">management page</a> of the proxy</p>
-<hr>
-  <iframe src="{{ .URL }}" width="100%" height="100%">
-    [Your user agent does not support frames or is currently configured
-     not to display frames.
-     However, you may visit <a href="{{ .URL }}">{{ .URL }}</a>.
-     <br>
-     To log out:
-      <form method="POST" action="/manage">
-        <input type="hidden" name="logout" value="{{ .Hostname }}">
-        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-       </form>]
-  </iframe>
-</body>
-</html>`))
 
 // eccaHandler: learn the users' selected account and set it as logged in.
 // then redirect to original request (where the user want to go to)/
@@ -108,13 +72,109 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 	//	return handleDirectConnections(req, ctx)
 	case eccaDialDirectConnectionPath:
 		return handleDialDirectConnection(req, ctx)
+        case eccaStaticPath:
+                return serveStaticFile(req, ctx)
 	// case eccaShowCertPath:
 	// 	return handleShowCert(req, ctx)
 	}
 	log.Printf("Unexpected request: %#v\n", req)
 	return nil, nil
 }
+func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	req.ParseForm()
+	var staticFile = req.Form.Get("file")
 
+	switch req.Method {
+	case "GET":
+
+		file, err := openFromStaticWhitelist(staticFile)
+		buf := bytes.NewBuffer(file)
+		if err != nil {
+			log.Fatal("error reading ", err)
+		}
+
+		contentType := getContentType(staticFile)
+
+		resp := makeResponse(req, 200, contentType, buf)
+		return nil, resp
+	}
+	log.Printf("Unexpected method: %#v", req.Method)
+	return nil, nil
+}
+func getContentType(staticFileName string) string {
+
+	var contentType string
+
+	switch staticFileName[:3] {
+	case "css":
+		contentType = "text/css"
+	case "js/":
+		contentType = "text/javascript"
+	case "img":
+		switch staticFileName[len(staticFileName)-3:] {
+		case "png":
+			contentType = "image/png"
+		default:
+			contentType = "image/unknown"
+		}
+	default:
+		contentType = "text/plain"
+	}
+	return contentType
+}
+
+func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
+
+	var staticDir = rice.MustFindBox("./static")
+
+	switch staticFileName {
+		case
+		"css/bootstrap.min.css",
+		"css/style.css",
+		"img/Message-clouds-icon.png",
+		"img/Call-incoming-icon.png",
+		"js/bootstrap.min.js",
+		"js/script.js",
+		"js/adjectives_nouns.js",
+		"js/tether.min.js",
+		"js/jquery-3.1.1.slim.min.js":
+		return staticDir.Bytes(staticFileName)
+	}
+	return nil, errors.New("No valid static filename given")
+}
+
+// uses the name to render "templates/`name`.html"
+// this adds the boilerplate of head.html and navbar.html
+func constructTemplate(name string) (*template.Template) {
+	funcMap := template.FuncMap{
+		// The name "mod" is what the function will be called in the template text.
+		"mod": func(a int, b int) int {
+			return a % b
+		},
+		"htmlescape": func(s string) string {
+			return html.EscapeString(s)
+		},
+		"unixToDateTime": func(timestamp int64) string {
+			return time.Unix(timestamp, 0).Format("Monday 02 January 2006 15:04")
+		},
+		"isEq": func(a *string, b string) bool {
+			if a == nil {
+				return false
+			}
+			return *a == b
+		},
+	}
+
+
+	var templateDir = rice.MustFindBox("./templates")
+
+	var filename = name+".html"
+	var templatestring = templateDir.MustString(filename)
+	var templ = template.Must(template.New(name).Funcs(funcMap).Parse(templatestring))
+	templ.Parse(templateDir.MustString("navbar.html"))
+	templ.Parse(templateDir.MustString("head.html"))
+	return templ
+}
 
 func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	var originalURL *url.URL
@@ -126,32 +186,32 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 	if err != nil {
 		log.Fatal("Error parsing originalRequest parameter: ", err)
 	}
-	log.Println("got param (originalRequest): ", originalRequest)
+	//log.Println("got param (originalRequest): ", originalRequest)
 
 	switch req.Method {
 	case "GET":
 		// User has no active logins.
 		// Show available client certificates for URI.Host
 		creds := getCreds(originalURL.Host)
-		buf := execTemplate(selectTemplate, "select", creds)
+		var selectTemplate = constructTemplate("select")
+		buf := execTemplate(selectTemplate, "select", map[string]interface{}{"Creds": creds, "Hostname": originalURL.Host})
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
 	case "POST":
 		var cred *credentials
-		if req.Form.Get("anonymous") != "" {
-			// register with random cn
-			cred, err = registerAnonymous(originalURL.Host)
-		}
+
+		comment := req.Form.Get("comment")
 
 		if req.Form.Get("register") != "" {
 			// register with given cn
-			cn := req.Form.Get("cn")
-			cred, err = registerCN(originalURL.Host, cn)
+			cn := req.Form.Get("register")
+			cred, err = registerCN(originalURL.Host, cn, comment)
 		}
 
 		if cn := req.Form.Get("login"); cn != "" {
 			cred = getCred(originalURL.Host, cn)
 		}
+
 
 		if err != nil {
 			resp := goproxy.NewResponse(req, "text/plain", 500, fmt.Sprintf("Error: %#v\n", err))
@@ -166,26 +226,19 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		// embed the original site in an iframe in our management frame.
 
 		originalURL.Scheme = "http" // send users follow up requests back to us
-		var data = map[string]string {
+		var data = map[string]interface{} {
 			"Hostname": originalURL.Host,
 			"CN": cred.CN,
 			"URL": originalURL.String(),
+			"Comment": cred.Comment,
 		}
+		var embedTemplate = constructTemplate("embed")
 		buf := execTemplate(embedTemplate, "embed", data)
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
 	}
 	log.Printf("Unexpected method: %#v", req.Method)
 	return nil, nil
-}
-
-
-// Register an anonymous account at the registerURL in the serverCredentials for hostname.
-// Set serverCAcert from the caPEM field.
-func registerAnonymous(hostname string) (*credentials, error) {
-	// create a unique userid
-	cn := "anon-" + strconv.Itoa(int(MathRand.Int31()))
-	return registerCN(hostname, cn)
 }
 
 
@@ -213,8 +266,8 @@ func getPort(address string) (string) {
 }
 
 // Register the named accountname at the sites' CA. Uses a new private key.
-func registerCN(hostname string, cn string) (*credentials, error) {
-	log.Println("registering cn: ", cn, " for: ", hostname)
+func registerCN(hostname string, cn string, comment string) (*credentials, error) {
+	log.Println("registering cn: ", cn, " for: ", hostname, " with comment: ", comment)
 
 	priv, err := rsa.GenerateKey(CryptoRand.Reader, 1024)
 	if err != nil {
@@ -236,12 +289,16 @@ func registerCN(hostname string, cn string) (*credentials, error) {
 
 	var privPEM  bytes.Buffer
 	pem.Encode(&privPEM, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+
 	creds := credentials{
 		Hostname: hostname,
 		Realm: "",
 		CN: cn,
 		Cert: cert,
 		Priv: privPEM.Bytes(),
+		Created: time.Now().Unix(),
+		LastUsed: time.Now().Unix(), // user is logged-in immedeatly
+		Comment: comment,
 	}
 	// Register the data and set it as login certificate
 	// It's what the user would expect from signup.
@@ -282,72 +339,6 @@ func signupPubkey(client *http.Client, registerURL string, cn string, pub rsa.Pu
 //------------------ Manager
 // show current logins and allow for logouts.
 
-var showLoginTemplate = template.Must(template.New("showLogins").Parse(
-`<html>
-<head>
-  <style>
-    table { border-top: 1px solid gray; border-bottom: 1px solid gray; }
-    tbody tr { background: #eee; }
-  </style>
-</head>
-<body>
- <h1>Manage your Eccentric Authentication logins</h1>
- <h3>Current logins</h3>
-  {{ if .current }}
-  <p>
-    <table>
-      <thead><tr><th>Host</th><th>Account</th><th>Action</th></tr></thead>
-      <tbody>
-        {{range $hostname, $cred := .current }}
-          <tr><td>{{ $hostname }}</td>
-              <td>{{ $cred.CN }}</td>
-              <td>
-                <form method="POST">
-                  <input type="hidden" name="logout" value="{{ .Hostname }}">
-                  <input type="submit" name="button" value="Log out of {{ .Hostname }}">
-                </form>
-              </td>
-          </tr>
-        {{ end }}
-      </tbody>
-    </table>
-  </p>
- {{ else }}
-   <p><em>You are not logged in anywhere.</em></p>
- {{ end }}
-
- <h3>All your accounts at hosts</h3>
-   <p>These are all your accounts we have private keys for.
-     <br>You can log in to any. Just click on the host name to get there anonymously.
-     <br>You'll get to choose the account when the sites asks for one.</p>
-     <p>
-     <table>
-     <thead>
-       <tr><th>Host</th>
-           <th>Accounts</th>
-           <th>Invited</th>
-           <th>App</th>
-           <!-- <th>Show full certificate</th> -->
-       </tr>
-     </thead>
-     <tbody>
-       {{ range $hostname, $details := .alldetails }}
-         <tr>
-           <td><a href="http://{{ $hostname }}/">{{ $hostname }}</a></td>
-           <td>{{ range $details }}{{ .ListenerCN        }}<br/>{{ end }}</td>
-           <td>{{ range $details }}{{ or .CallerCN    "" }}<br/>{{ end }}</td>
-           <td>{{ range $details }}{{ or .Application "" }}<br/>{{ end }}</td>
-         </tr>
-       {{ else }}
-         <tr><td colspan="4">You have no accounts anywhere. </td></tr>
-       {{ end }}
-     </tbody>
-     </table>
-   </p>
-</body>
-</html>`))
-
-
 func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	req.ParseForm()
 	log.Printf("Form parameters are: %v\n", req.Form)
@@ -356,6 +347,7 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 	case "GET":
 		details := getAllDetails()
 
+		var showLoginTemplate = constructTemplate("showLogins")
 		buf  := execTemplate(showLoginTemplate, "showLogins", map[string]interface{}{
 			"current":    logins,
 			"alldetails": details,
@@ -635,9 +627,9 @@ func makeRedirect(req *http.Request, redirectURL *url.URL) (*http.Response) {
 
 	body := "Redirect to " + redirectURL.String()
 	buf := bytes.NewBufferString(body)
-        resp.ContentLength = int64(buf.Len())
-        resp.Body = ioutil.NopCloser(buf)
-        return resp
+	resp.ContentLength = int64(buf.Len())
+	resp.Body = ioutil.NopCloser(buf)
+	return resp
 }
 
 
@@ -653,8 +645,9 @@ func makeResponse(req *http.Request, code int, contType string, buf *bytes.Buffe
 }
 
 
-func execTemplate(template *template.Template, name string, data interface{}) (*bytes.Buffer) {
+func execTemplate(template *template.Template, name string, data map[string]interface{}) (*bytes.Buffer) {
 	buf := new(bytes.Buffer)
+	data["Page"] = name
 	err := template.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		log.Fatal("error executing template: ", err)
