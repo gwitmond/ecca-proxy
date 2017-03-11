@@ -1,0 +1,23 @@
+<html>
+  <body>
+    <p>Ecca Proxy. You are logged in {{ .Hostname }} with {{ .CN }}.
+    Press here to logout:
+    <form method="POST" action="/manage">
+      <input type="hidden" name="logout" value="{{ .Hostname }}">
+      <input type="submit" name="button" value="Log out of {{ .Hostname }}">
+    </form></p>
+    <p>Click here to go to the <a href="/manage">management page</a> of the proxy</p>
+    <hr>
+    <iframe src="{{ .URL }}" width="100%" height="100%">
+      [Your user agent does not support frames or is currently configured
+      not to display frames.
+      However, you may visit <a href="{{ .URL }}">{{ .URL }}</a>.
+      <br>
+      To log out:
+      <form method="POST" action="/manage">
+        <input type="hidden" name="logout" value="{{ .Hostname }}">
+        <input type="submit" name="button" value="Log out of {{ .Hostname }}">
+      </form>]
+    </iframe>
+  </body>
+</html>
