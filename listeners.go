@@ -10,12 +10,10 @@
 package main // eccaproxy
 
 import (
-	"fmt"
 	"net"
 	"log"
 	"crypto/tls"
 	"crypto/x509"
-	"github.com/gwitmond/goControlTor"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
@@ -32,8 +30,9 @@ import (
 // 	//Responder func(*tls.Conn)
 // }
 
+
 type listener struct {
-	Application string               // chat/voice/video/ etc, as long as both endpoint agree 
+	Application string               // chat/voice/video/ etc, as long as both endpoints agree
 	OnionAddress string              // xyz.onion address
 	Endpoint string                  // our local listening point (where the onion data gets delivered)
 	ListenerCN string                // our CN (server name)
@@ -48,6 +47,10 @@ type listener struct {
 }
 
 
+/* createTorListener creates and starts a Tor Hidden Service
+ * to let the given caller connect using the app.
+ * Returns: the listener details to recreate it at a later run.
+ */
 func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app string) (listener) {
 	// check to see if we get sane credentials
 	_, err := tls.X509KeyPair(ourCreds.Cert, ourCreds.Priv)
@@ -62,25 +65,14 @@ func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app 
 	callerFPCACertPEM := eccentric.PEMEncode(callerFPCACert)
 
 	// Create listening socket for the onion hidden service and get its endpoint address
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	netl, err := net.Listen("tcp", "127.0.0.1:0")
 	check(err)
-	endpoint := l.Addr().String()
+	endpoint := netl.Addr().String()
 
 	// Create a .onion endpoint at port 443
-	tc := &goControlTor.TorControl{}
-	err = tc.Dial("unix", "/var/run/tor/control")
-	check(err)
-	err = tc.CookieAuthenticate("/var/run/tor/control.authcookie")
-	check(err)
-	log.Printf("Logged into Tor, creating hidden service")
-	onion, onionPrivKey, err := tc.CreateEphemeralHiddenService("443", endpoint)
-	check(err)
-	log.Printf("Created onion address: %v", onion)
-	onionAddress := fmt.Sprintf("%s.onion:443", onion)
+	onionAddress, onionPrivKey := createTorHiddenService("443", endpoint)
 
-	log.Printf("createListener at %v for %v", endpoint, onionAddress)
-
-	return listener {
+	listener := listener {
 		Application: app,
 		Endpoint: endpoint,
 		ListenerCN: ourCreds.CN,
@@ -94,6 +86,11 @@ func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app 
 		OnionAddress: onionAddress,
 		OnionPrivKey: []byte(onionPrivKey),
 	}
+
+	// start it
+	go startListener(netl, listener)
+
+	return listener
 }
 
 
@@ -170,11 +167,36 @@ func restartAllTorListeners() {
 // 	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN)
 // }
 
-
 func restartTorListener(listener listener) {
-	// The CA-pool specifies which client certificates can log in to our site.
-	log.Printf("Starting Tor listener at address: %v", listener.OnionAddress)
+	// This is what we want:
+	// use a fresh port guaranteed to be available
+	//netl, err := net.Listen("tcp", "127.0.0.1:0")
 
+	// This is what we do:
+	// Reopen the endpoint that was used to create the hidden service.
+	// Tor assumes it's only used for services at well known ports that never change.
+	// It appears that changing the local listening port to a fresh port at restart
+	// of the proxy makes other tor nodes that have connected to us before break.
+	// Those nodes fail to connect the first N attempts.
+	netl, err := net.Listen("tcp", listener.Endpoint)
+	check(err)
+	endpoint := netl.Addr().String()
+
+	// Restart a .onion endpoint at port 443
+	err = restartTorHiddenService(listener.OnionPrivKey, listener.OnionAddress, "443", endpoint)
+	check(err)
+	//if onionAddress != listener.OnionAddress {
+	//	log.Printf("Expected %v, got %v", listener.OnionAddress, onionAddress)
+	//	panic("Restarted with different address than when we started.")
+	//}
+	log.Printf("Restarted Listener at %v for %v", endpoint, listener.OnionAddress)
+
+	startListener(netl, listener)
+}
+
+
+func startListener(netl net.Listener, listener listener) {
+	// The CA-pool specifies which client certificates can log in to our site.
 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
 	pool := x509.NewCertPool()
 	pool.AddCert(&CallerFPCACert)
@@ -189,37 +211,6 @@ func restartTorListener(listener listener) {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
-
-	// This is what we want:
-	// use a fresh port guaranteed to be available
-	//netl, err := net.Listen("tcp", "127.0.0.1:0")
-
-	// This is what we do:
-	// Reopen the endpoint that was used to create the hidden service.
-	// Tor assumes it's only used for services at well known ports that never change.
-	// It appears that changing the local listening port to a fresh port at restart
-	// of the proxy makes other tor nodes that have connected to us before break.
-	// Those nodes fail to connect the first N attempts.
-	netl, err := net.Listen("tcp", listener.Endpoint)
-
-	check(err)
-	endpoint := netl.Addr().String()
-
-	// Restart a .onion endpoint at port 443
-	tc := &goControlTor.TorControl{}
-	err = tc.Dial("unix", "/var/run/tor/control")
-	check(err)
-	err = tc.CookieAuthenticate("/var/run/tor/control.authcookie")
-	check(err)
-	log.Printf("Logged into Tor, restarting hidden service")
-	onion, err := tc.RestartEphemeralHiddenService(listener.OnionPrivKey, "443", endpoint)
-	check(err)
-	log.Printf("Started onion address: %v", onion)
-	onionAddress := fmt.Sprintf("%s.onion:443", onion)
-	if onion != "" && onionAddress != listener.OnionAddress {
-		panic("Restarted with different address than when we started.")
-	}
-	log.Printf("Started Listener at %v for %v", endpoint, onionAddress)
 	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN, listener.Application)
 }
 
