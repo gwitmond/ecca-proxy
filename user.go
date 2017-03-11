@@ -39,6 +39,7 @@ var eccaHandlerHost = "ecca.handler"
 var eccaHandlerPath = "/select"
 var eccaManagerPath = "/manage"
 var eccaShowCertPath= "/showcert"
+var eccaStaticPath  = "/static"
 //var eccaDirectConnectionPath= "/direct-connection"
 var eccaDialDirectConnectionPath= "/dial-direct-connection"
 
@@ -71,6 +72,8 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 	//	return handleDirectConnections(req, ctx)
 	case eccaDialDirectConnectionPath:
 		return handleDialDirectConnection(req, ctx)
+        case eccaStaticPath:
+                return serveStaticFile(req, ctx)
 	// case eccaShowCertPath:
 	// 	return handleShowCert(req, ctx)
 	}
@@ -89,6 +92,47 @@ func constructTemplate(name string) (*template.Template) {
         var templ = template.Must(template.New(name).Parse(templatestring))
         return templ
 }
+
+func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+        var path = req.URL.Path
+        log.Println("path is: ", path)
+	req.ParseForm()
+	log.Printf("Form parameters are: %v\n", req.Form)
+	var staticFile = req.Form.Get("file")
+	log.Println("got param (file): ", staticFile)
+
+	switch req.Method {
+	case "GET":
+
+                file, err := openFromStaticWhitelist(staticFile)
+                buf := bytes.NewBuffer(file)
+                if err != nil {
+                  log.Fatal("error reading ", err)
+                }
+
+		resp := makeResponse(req, 200, "text/css", buf)
+		return nil, resp
+	}
+	log.Printf("Unexpected method: %#v", req.Method)
+	return nil, nil
+}
+
+func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
+
+        var staticDir = rice.MustFindBox("./static")
+
+        switch staticFileName {
+        case
+              "css/bootstrap.min.css",
+              "js/bootstrap.min.js",
+              "js/tether.min.js",
+              "js/jquery-3.1.1.slim.min.js":
+                return staticDir.Bytes(staticFileName)
+        }
+        return nil, errors.New("No valid static filename given")
+}
+
+
 
 func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	var originalURL *url.URL
