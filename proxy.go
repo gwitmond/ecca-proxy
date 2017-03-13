@@ -81,7 +81,7 @@ func main() {
 	//server6.SetKeepAlivesEnabled(false)
 
 	server4 := &http.Server {
-          Addr: fmt.Sprintf("%s:%d", *ip4ListenAddr, *port),
+		Addr: fmt.Sprintf("%s:%d", *ip4ListenAddr, *port),
 		Handler: proxy,
 	}
 	// TODO: disable KeepAlives when your golang version supports it
