@@ -25,7 +25,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"time"
-	"html"
 	"os/exec"
 	"strconv"
 	"regexp"
@@ -120,9 +119,6 @@ func constructTemplate(name string) (*template.Template) {
 		// The name "mod" is what the function will be called in the template text.
 		"mod": func(a int, b int) int {
 			return a % b
-		},
-		"htmlescape": func(s string) string {
-			return html.EscapeString(s)
 		},
 		"unixToDateTime": func(timestamp int64) string {
 			return time.Unix(timestamp, 0).Format("Monday 02 January 2006 15:04")
