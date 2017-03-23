@@ -11,7 +11,6 @@ package main // eccaproxy
 
 import (
 	"fmt"
-
 	// These are for the data storage
 	"gopkg.in/gorp.v1"
         "database/sql"
@@ -39,6 +38,7 @@ func init_datastore(datastore string) {
 func setCredentials(cred credentials) {
 	check(dbmap.Insert(&cred))
 }
+
 
 func updateLastUsedTime(cred credentials) {
 

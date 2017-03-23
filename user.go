@@ -184,20 +184,24 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		return nil, resp
 	case "POST":
 		var cred *credentials
+
+		comment := req.Form.Get("comment")
+
 		if req.Form.Get("anonymous") != "" {
 			// register with random cn
-			cred, err = registerAnonymous(originalURL.Host)
+			cred, err = registerAnonymous(originalURL.Host, comment)
 		}
 
 		if req.Form.Get("register") != "" {
 			// register with given cn
-			cn := req.Form.Get("cn")
-			cred, err = registerCN(originalURL.Host, cn)
+			cn := req.Form.Get("register")
+			cred, err = registerCN(originalURL.Host, cn, comment)
 		}
 
 		if cn := req.Form.Get("login"); cn != "" {
 			cred = getCred(originalURL.Host, cn)
 		}
+
 
 		if err != nil {
 			resp := goproxy.NewResponse(req, "text/plain", 500, fmt.Sprintf("Error: %#v\n", err))
@@ -229,10 +233,10 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 
 // Register an anonymous account at the registerURL in the serverCredentials for hostname.
 // Set serverCAcert from the caPEM field.
-func registerAnonymous(hostname string) (*credentials, error) {
+func registerAnonymous(hostname string, comment string) (*credentials, error) {
 	// create a unique userid
 	cn := "anon-" + strconv.Itoa(int(MathRand.Int31()))
-	return registerCN(hostname, cn)
+	return registerCN(hostname, cn, comment)
 }
 
 
@@ -260,8 +264,8 @@ func getPort(address string) (string) {
 }
 
 // Register the named accountname at the sites' CA. Uses a new private key.
-func registerCN(hostname string, cn string) (*credentials, error) {
-	log.Println("registering cn: ", cn, " for: ", hostname)
+func registerCN(hostname string, cn string, comment string) (*credentials, error) {
+	log.Println("registering cn: ", cn, " for: ", hostname, " with comment: ", comment)
 
 	priv, err := rsa.GenerateKey(CryptoRand.Reader, 1024)
 	if err != nil {
@@ -292,6 +296,7 @@ func registerCN(hostname string, cn string) (*credentials, error) {
 		Priv: privPEM.Bytes(),
 		Created: time.Now().Unix(),
 		LastUsed: time.Now().Unix(), // user is logged-in immedeatly
+		Comment: comment,
 	}
 	// Register the data and set it as login certificate
 	// It's what the user would expect from signup.
