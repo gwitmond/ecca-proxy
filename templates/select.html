@@ -75,7 +75,7 @@
                 <div class="form-inline" style="width:100%">
                   <label for="new_name" class="sr-only">Choose your own name</label>
                   <div class="input-group" style="width:100%">
-                    <input type="text" class="form-control" placeholder="Choose your own name" name="register">
+                    <input type="text" class="form-control" placeholder="Choose your own name" name="register" id="register_name">
                     <span class="input-group-btn">
                       <button class="btn btn-outline-primary" type="submit" style="width:auto;">Register this name</button>
                     </span>
@@ -85,8 +85,8 @@
             </div>
             <div class="row text-center pr-3">
               <div class="form-group" style="width:100%">
-                <label for="register_anonymous" class="sr-only">Or register anonymously:</label>
-                <input type="submit" name="anonymous" value="Or register anonymously" id="register_anonymous" class="form-control btn btn-outline-warning">
+                <label for="register_anonymous" class="sr-only">Or generate a random name:</label>
+		<button type="button"value="" id="register_anonymous" class="form-control btn btn-outline-warning" onclick="generateRandomName()">Or generate a random name</button>
               </div>
             </div>
             <div class="row text-center pr-3">
