@@ -3,65 +3,71 @@
   {{template "head"}}
   <body>
     <div class="container">
-      {{template "navbar" }}
+      {{template "navbar" . }}
+      <div class="row my-3">
+        {{if .Hostname }}
+        <div class="col text-center">
+          <h1>{{ .Hostname }}</h1>
+        </div>
+      </div>
       <div class="row">
-        <div class="col-md-6 col-sm-12">
-          <form method="POST">
-            <div class="row text-center">
-              <div class="col">
-                {{if gt (len $) 0 }}
-                <h3>Use an existing identity</h3>
-                {{else}}
-                <h3>No existing identities</h3>
-                {{end}}
-              </div>
+        {{end}}
+        <div class="col-md-6 col-sm-12" style="overflow:hidden;">
+          <div class="row text-center">
+            <div class="col">
+              {{if gt (len $) 0 }}
+              <h3>Use an existing identity</h3>
+              {{else}}
+              <h3>No existing identities</h3>
+              {{end}}
             </div>
-            {{ range $i, $x := $ }}
-            {{ $name := printf "%.25s" $x.CN }}
-            <div class="jumbotron m-3 p-2">
-              <div class="row">
-                <div class="col">
+          </div>
+          {{ range $i, $x := .Creds }}
+          {{ $name := printf "%.25s" $x.CN }}
+          <div class="jumbotron m-3 p-2">
+            <div class="row">
+              <div class="col">
+                <form method="POST">
                   <input type="hidden" name="login" value="{{$x.CN}}"/>
                   <button type="submit"
                     class="btn btn-info btn-block"
                     >
                     {{ $name }}{{ if gt (len $x.CN) 25}}{{"..."}}{{end}}
                   </button>
-                </div>
+                </form>
               </div>
-              <div class="row">
-                <div class="col-sm-6">
-                  <label for="created-date-{{$x.CN}}" class="small">Created:</label>
-                  <div id="created-date-{{$x.CN}}" class="small">{{ unixToDateTime $x.Created}}</div>
-                </div>
-                <div class="col-sm-6">
-                  <label for="last-used-date-{{$x.CN}}" class="small">Last Used:</label>
-                  <div id="last-used-date-{{$x.CN}} small" class="small">
-                    {{ if $x.LastUsed }}{{ unixToDateTime $x.LastUsed}}{{ else }}Never{{end}}
-                  </div>
-                </div>
+            </div>
+            <div class="row">
+              <div class="col-sm-6">
+                <label for="created-date-{{$x.CN}}" class="small">Created:</label>
+                <div id="created-date-{{$x.CN}}" class="small">{{ unixToDateTime $x.Created}}</div>
               </div>
-              <div class="row">
-                <div class="col-sm-6">
-                  <p>
-                    {{ $x.Comment }}
-                  </p>
+              <div class="col-sm-6">
+                <label for="last-used-date-{{$x.CN}}" class="small">Last Used:</label>
+                <div id="last-used-date-{{$x.CN}} small" class="small">
+                  {{ if $x.LastUsed }}{{ unixToDateTime $x.LastUsed}}{{ else }}Never{{end}}
                 </div>
               </div>
             </div>
-            {{else}}
-            <div class="col mx-0">
-              <div class="jumbotron my-3 mx-0 p-2">
+            <div class="row">
+              <div class="col-sm-6">
                 <p>
-                  You do not have any identities with this website, please create one with the menu on the right.
-                </p>
-                <p>
-
+                  {{ $x.Comment }}
                 </p>
               </div>
             </div>
-            {{end}}
-          </form>
+          </div>
+          {{else}}
+          <div class="col mx-0">
+            <div class="jumbotron my-3 mx-0 p-2">
+              <p>
+                You do not have any identities with this website, please create one with the menu on the right.
+              </p>
+              <p>
+              </p>
+            </div>
+          </div>
+          {{end}}
         </div>
         <div class="col-sm-12 col-md-6">
           <form method="POST">
@@ -86,7 +92,7 @@
             <div class="row text-center pr-3">
               <div class="form-group" style="width:100%">
                 <label for="register_anonymous" class="sr-only">Or generate a random name:</label>
-		<button type="button"value="" id="register_anonymous" class="form-control btn btn-outline-warning" onclick="generateRandomName()">Or generate a random name</button>
+                <button type="button"value="" id="register_anonymous" class="form-control btn btn-outline-warning" onclick="generateRandomName()">Or generate a random name</button>
               </div>
             </div>
             <div class="row text-center pr-3">
