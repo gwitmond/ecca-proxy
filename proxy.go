@@ -494,7 +494,8 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 				ciphertext := ciphertextNode.GetValue()
 				cleartext, senderCert, err := DecryptAndVerify([]byte(ciphertext), cred.Priv)
 				check(err)
-				log.Printf("cleartext is: %v", cleartext[:50])
+				l := len(cleartext)
+				log.Printf("cleartext (%v) is: %v", l, cleartext[:min(l,50)])
 				log.Printf("Identity from message is %s\n", senderCert.Subject.CommonName)
 				sender := senderCert.Subject.CommonName
 				if senderNode.GetValue() != sender {
@@ -540,7 +541,7 @@ func DecodeMessages(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 // Returns either the button for an invitation, or nil to signal the original cleartext to be shown
 func findDirectConnectionInvitation(cleartext string, senderCert *x509.Certificate) *xmlx.Node {
 	// for now, the whole message must be the base64 gob encoded DCInvitation
-	log.Printf("cleartext is [%#v]", cleartext[:50])
+	log.Printf("cleartext is [%#v]", cleartext[:min(len(cleartext),50)])
 
 	// See if we can decode it into a invitation-struct
 	invitation := parseInvitation(cleartext)
@@ -726,4 +727,12 @@ func slurpFile(filename string) []byte {
         contents, err := ioutil.ReadAll(f)
         check(err)
         return contents
+}
+
+func min(a, b int) int {
+  if a <= b {
+    return a
+  } else {
+    return b
+  }
 }
