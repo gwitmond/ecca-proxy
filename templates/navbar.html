@@ -1,0 +1,31 @@
+{{define "navbar"}}
+<nav class="navbar navbar-toggleable-md navbar-light bg-faded navbar-fixed-top" id="ecca-nav">
+  <button class="navbar-toggler navbar-toggler-right" type="button" data-toggle="collapse" data-target="#navbarNavAltMarkup" aria-controls="navbarNavAltMarkup" aria-expanded="false" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+  <a class="navbar-brand" href="#">Eccentric Authentication</a>
+  <div class="collapse navbar-collapse" id="navbarNavAltMarkup">
+    <div class="navbar-nav">
+      <a class="nav-item nav-link" href="/manage">Manage</a>
+      <a class="nav-item nav-link {{if eq .Page "select"}}active{{else}}disabled{{end}}" href="{{if ne .Page "select"}}#{{end}}" >Select</a>
+      <a class="nav-item nav-link disabled" href="#" disabled>Show Cert</a>
+    </div>
+  </div>
+  {{if eq .Page "embed"}}
+  <div class="navbar-right mx-3">
+    <button type="button" class="btn btn-outline-secondary" onclick="hideAccountHandler()">Hide account handler</button>
+  </div>
+  {{end}}
+  <span class="navbar-text navbar-right text-nowrap">
+    {{if .Hostname}}
+    Visiting&nbsp;{{.Hostname}}{{if .CN}}&nbsp;as&nbsp;<strong>{{.CN}}</strong>{{end}}
+    {{end}}
+  </span>
+  {{if .CN}}
+  <form method="POST" action="/manage" class="form-inline my-2 my-lg-0 ml-3">
+    <input type="hidden" name="logout" value="{{ .Hostname }}">
+    <input type="submit" name="button" class="btn btn-outline-primary" value="Log out">
+  </form>
+  {{end}}
+</nav>
+{{end}}

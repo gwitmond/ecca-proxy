@@ -11,11 +11,11 @@ package main // eccaproxy
 
 import (
 	"fmt"
-
 	// These are for the data storage
 	"gopkg.in/gorp.v1"
         "database/sql"
         _ "github.com/mattn/go-sqlite3"
+	"time"
 )
 
 
@@ -25,7 +25,7 @@ func init_datastore(datastore string) {
         db, err := sql.Open("sqlite3", datastore)
         check(err)
         dbmap = &gorp.DbMap{Db: db, Dialect: gorp.SqliteDialect{}}
-        dbmap.AddTableWithName(credentials{}, "credentials")  // .SetKeys(false, "CN", "Realm")
+        dbmap.AddTableWithName(credentials{}, "credentials").SetKeys(true, "Id")
 	dbmap.AddTableWithName(listener{}, "listeners")
         dbmap.CreateTables() // if not exists
 
@@ -37,6 +37,14 @@ func init_datastore(datastore string) {
 // People can have multiple accounts a host.
 func setCredentials(cred credentials) {
 	check(dbmap.Insert(&cred))
+}
+
+
+func updateLastUsedTime(cred credentials) {
+
+	cred.LastUsed = time.Now().Unix()
+	_, err := dbmap.Update(&cred)
+	check(err)
 }
 
 // Just get all credentials... (sorted by getCredentials)

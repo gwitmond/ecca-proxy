@@ -1,29 +1,107 @@
 <!DOCTYPE html>
 <html>
+  {{template "head"}}
   <body>
     <div class="container">
-      <h1>401 - Eccentric Authentication required</h1>
-      <form method="POST" >
-	<div class="form-group">
-	  <p>Please select one of these identies</p>
-	  {{ range . }}
-	  <input type="submit" name="login" value="{{ .CN }}">
-	  {{ else }}
-	  <h3> No identities available </h3>
-	  {{ end }}
-	  <br>
-	</div>
-	<div class="form-group">
-	  <p>Or create a new one</p>
-	  <input type="text" name="cn" class="form-control">
-	  <input type="submit" name="register" value="Register this name">
-	  <br>
-	</div>
-	<div class="form-group">
-	  <p>Or register anonymously:</p>
-	  <input type="submit" name="anonymous" value="Anonymous">
-	</div>
-      </form>
+      {{template "navbar" . }}
+      <div class="row my-3">
+        {{if .Hostname }}
+        <div class="col text-center">
+          <h1>{{ .Hostname }}</h1>
+        </div>
+      </div>
+      <div class="row">
+        {{end}}
+        <div class="col-md-6 col-sm-12" style="overflow:hidden;">
+          <div class="row text-center">
+            <div class="col">
+              {{if gt (len $) 0 }}
+              <h3>Use an existing identity</h3>
+              {{else}}
+              <h3>No existing identities</h3>
+              {{end}}
+            </div>
+          </div>
+          {{ range $i, $x := .Creds }}
+          {{ $name := printf "%.25s" $x.CN }}
+          <div class="jumbotron m-3 p-2">
+            <div class="row">
+              <div class="col">
+                <form method="POST">
+                  <input type="hidden" name="login" value="{{$x.CN}}"/>
+                  <button type="submit"
+                    class="btn btn-primary btn-block"
+                    >
+                    {{ $name }}{{ if gt (len $x.CN) 25}}{{"..."}}{{end}}
+                  </button>
+                </form>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-sm-6">
+                <label for="created-date-{{$x.CN}}" class="small">Created:</label>
+                <div id="created-date-{{$x.CN}}" class="small">{{ unixToDateTime $x.Created}}</div>
+              </div>
+              <div class="col-sm-6">
+                <label for="last-used-date-{{$x.CN}}" class="small">Last Used:</label>
+                <div id="last-used-date-{{$x.CN}} small" class="small">
+                  {{ if $x.LastUsed }}{{ unixToDateTime $x.LastUsed}}{{ else }}Never{{end}}
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-sm-6">
+                <p>
+                  {{ $x.Comment }}
+                </p>
+              </div>
+            </div>
+          </div>
+          {{else}}
+          <div class="col mx-0">
+            <div class="jumbotron my-3 mx-0 p-2">
+              <p>
+                You do not have any identities with this website, please create one with the menu on the right.
+              </p>
+              <p>
+              </p>
+            </div>
+          </div>
+          {{end}}
+        </div>
+        <div class="col-sm-12 col-md-6">
+          <form method="POST">
+            <div class="row text-center">
+              <div class="col">
+                <h3>Create a new identity</h3>
+              </div>
+            </div>
+            <div class="row text-center mt-3 pr-3">
+              <div class="form-group" style="width:100%">
+                <div class="form-inline" style="width:100%">
+                  <label for="new_name" class="sr-only">Choose your own name</label>
+                  <div class="input-group" style="width:100%">
+                    <input type="text" class="form-control" placeholder="Choose your own name" name="register" id="register_name">
+                    <span class="input-group-btn">
+                      <button class="btn btn-outline-primary" type="submit" style="width:auto;">Register this name</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="row text-center pr-3">
+              <div class="form-group" style="width:100%">
+                <label for="register_anonymous" class="sr-only">Or generate a random name:</label>
+                <button type="button"value="" id="register_anonymous" class="form-control btn btn-outline-warning" onclick="generateRandomName()">Or generate a random name</button>
+              </div>
+            </div>
+            <div class="row text-center pr-3">
+              <label for="account_notes" class="sr-only">Add a note to the new account:</label>
+              <textarea name="comment" placeholder="Add optional notes to your account (for your eyes only)  e.g. this account will only be used on every tuesday" id="account_notes" class="form-control" rows="5"></textarea>
+            </div>
+          </div>
+        </form>
+      </div>
     </div>
   </body>
 </html>
