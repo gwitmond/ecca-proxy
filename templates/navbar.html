@@ -8,7 +8,7 @@
     <div class="navbar-nav">
       <a class="nav-item nav-link" href="/manage">Manage</a>
       <a class="nav-item nav-link {{if eq .Page "select"}}active{{else}}disabled{{end}}" href="{{if ne .Page "select"}}#{{end}}" >Select</a>
-      <a class="nav-item nav-link disabled" href="#" disabled>Show Cert</a>
+      <a class="nav-item nav-link disabled" href="/direct-connection">Direct Connections</a>
     </div>
   </div>
   {{if eq .Page "embed"}}
