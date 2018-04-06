@@ -38,6 +38,8 @@ var verbose = flag.Bool("v", true, "should every proxy request be logged to stdo
 //var registryUrl = flag.String("registry", "https://registry-of-honesty.eccentric-authentication.org:1024/", "The Registry of (dis)honesty to query for duplicate certificates.")
 var datastore = flag.String("datastore", "ecca-proxy.sqlite3", "The location where to store the identities and invitations")
 var torSocksPort = flag.String("torsocks", "127.0.0.1:9050", "The address of the TorSocks port to connect to for outbound connections")
+var torControlPort = flag.String("torcontrolport", "127.0.0.1:9051", "The address of the Tor ControlPort to create hidden services")
+var torControlPassword = flag.String("torcontrolpassword", "geheim", "The password to authenticate at the Tor ControlPort")
 
 
 func main() {

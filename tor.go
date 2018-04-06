@@ -17,9 +17,9 @@ import (
 
 func createTorHiddenService(torPort, endpoint string) (string, string) {
 	tc := &goControlTor.TorControl{}
-	err := tc.Dial("unix", "/var/run/tor/control")
+	err := tc.Dial("tcp", *torControlPort)
 	check(err)
-	err = tc.CookieAuthenticate("/var/run/tor/control.authcookie")
+	err = tc.PasswordAuthenticate(*torControlPassword)
 	check(err)
 	log.Printf("Logged into Tor, creating hidden service")
 	onion, onionPrivKey, err := tc.CreateEphemeralHiddenService(torPort, endpoint)
@@ -33,11 +33,11 @@ func createTorHiddenService(torPort, endpoint string) (string, string) {
 
 func restartTorHiddenService(onionPrivKey []byte, torPort, endpoint, dest string) error {
 	tc := &goControlTor.TorControl{}
-	err := tc.Dial("unix", "/var/run/tor/control")
+	err := tc.Dial("tcp", *torControlPort)
 	if err != nil {
 		return err
 	}
-	err = tc.CookieAuthenticate("/var/run/tor/control.authcookie")
+	err = tc.PasswordAuthenticate(*torControlPassword)
 	if err != nil {
 		return err
 	}
