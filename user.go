@@ -482,14 +482,14 @@ func startChatApp(tlsconn *tls.Conn, remoteCN string){
 // Start the simple voice app on the encrypted channel.
 func startVoiceApp(tlsconn *tls.Conn, remoteCN string){
 	// start the speaker part and connect it to our socket
-	spr := exec.Command("/usr/bin/aplay")
+	spr := exec.Command("/usr/bin/env", "aplay")
 	spr.Stdin = tlsconn
 	err := spr.Start() // start asynchronously
 	check(err)
 
 	// start the microphone too
 	// defaults: 1 channel 8000 Hz sample rate, WAVE format
-	mic := exec.Command("/usr/bin/arecord")
+	mic := exec.Command("/usr/bin/env", "arecord", "--rate=8000")
 	mic.Stdout = tlsconn
 	err = mic.Start() // start asynchronously
 	check(err)
