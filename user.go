@@ -40,7 +40,7 @@ var eccaHandlerPath = "/select"
 var eccaManagerPath = "/manage"
 var eccaShowCertPath= "/showcert"
 var eccaStaticPath  = "/static"
-//var eccaDirectConnectionPath= "/direct-connection"
+var eccaDirectConnectionPath= "/direct-connection"
 var eccaDialDirectConnectionPath= "/dial-direct-connection"
 
 func redirectToSelector(req *http.Request) (*http.Response) {
@@ -68,8 +68,8 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 		return handleSelect(req, ctx)
 	case eccaManagerPath:
 		return handleManager(req, ctx)
-	//case eccaDirectConnectionPath:
-	//	return handleDirectConnections(req, ctx)
+	case eccaDirectConnectionPath:
+		return handleDirectConnections(req, ctx)
 	case eccaDialDirectConnectionPath:
 		return handleDialDirectConnection(req, ctx)
         case eccaStaticPath:
@@ -336,9 +336,79 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 
 
 func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	return nil, goproxy.NewResponse(req,
-		goproxy.ContentTypeText, http.StatusOK,
-		"Ecca Proxy message: Expect a list of your open ports to others to connect to you.")
+        // Show received calls waiting for accept;
+        // Show active calls;
+        // Handle buttons to accept, reject and hang up calls.
+	req.ParseForm()
+	log.Printf("Form parameters are: %v\n", req.Form)
+	log.Printf("callers_waiting is %v\n", callers_waiting)
+	log.Printf("active_calls is %v\n", active_calls)
+	switch req.Method {
+	case "GET":
+		var template = constructTemplate("directConnections")
+		buf  := execTemplate(template, "directConnections", map[string]interface{}{
+		    "callers": callers_waiting,
+		    "active_calls": active_calls,
+		})
+		resp := makeResponse(req, 200, "text/html", buf)
+		return nil, resp
+	case "POST":
+		id := req.Form.Get("id")
+		accept := req.Form.Get("accept")
+		reject := req.Form.Get("reject")
+		hangup := req.Form.Get("hangup")
+
+		if id == "" {
+		    log.Printf("Error: No <id> given. Reject request.\n")
+		} else {
+
+		    if accept != "" || reject != "" {
+		        caller, exists := callers_waiting[id]
+		        if !exists {
+		            // No such id
+		            log.Printf("Error: Id not found in callers_waiting. Reject request.\n")
+		        } else {
+
+		            if accept != "" {
+                                // user wants to connect to caller
+				log.Printf("Accepting call from %v\n", caller.UserCN)
+			    	// move caller to active-callers
+			    	delete(callers_waiting, id)
+			    	active_calls[id] = caller
+			    	// signal acceptance and get going
+			    	_, _ = caller.Tlsconn.Write([]byte("call accepted\n"))
+			    	go startPayload(id, caller.Tlsconn, caller.UserCN, caller.App)
+		            }
+
+			    if reject != "" {
+		                // user wants to refuse the connection
+			    	delete(callers_waiting, id)
+			    	_, _ = caller.Tlsconn.Write([]byte("call refused\n"))
+			    	caller.Tlsconn.Close()
+			    }
+			}
+		    }
+
+		    if hangup != "" {
+		    	caller, exists := active_calls[id]
+		        if !exists {
+		            // No such id
+		            log.Printf("Error: Id not found in active_call. Reject request.\n")
+		        } else {
+		            // user wants to hangup the connection
+			    delete(active_calls, id)
+			    caller.Tlsconn.Close()
+			}
+		    }
+		}
+
+		// redirect back to ourself to show the updated status in calls_waiting and active_calls
+		resp := makeRedirect(req, req.URL)
+		return nil, resp
+	}
+
+	log.Fatal("Unexpected method: ", req.Method)
+	return nil, nil
 }
 
 
@@ -430,20 +500,26 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	err = tlsconn.Handshake()
 	check(err)
 
-	go startPayload(tlsconn, invitation.ListenerCN, invitation.Application)
+	id := makeToken()
+	callers_waiting[id] = caller {
+            UserCN:  invitation.ListenerCN,
+	    App:     invitation.Application,
+	    Tlsconn: tlsconn,
+        }
+	go startPayload(id, tlsconn, invitation.ListenerCN, invitation.Application)
 	return fmt.Sprintf("Starting application: %s.", invitation.Application)
 }
 
 // Start the requested application eg. chat/voice/video etc
-func startPayload(tlsconn *tls.Conn, remoteCN, app string){
+func startPayload(id string, tlsconn *tls.Conn, remoteCN, app string){
 	switch app {
-	case "chat": startChatApp(tlsconn, remoteCN)
-	case "voice": startVoiceApp(tlsconn, remoteCN)
+	case "chat": startChatApp(id, tlsconn, remoteCN)
+	case "voice": startVoiceApp(id, tlsconn, remoteCN)
 	}
 }
 
 // Start the simple chat app on the encrypted channel.
-func startChatApp(tlsconn *tls.Conn, remoteCN string){
+func startChatApp(id string, tlsconn *tls.Conn, remoteCN string){
 	// Create listener socket for the simple chat
 	socket, err := net.Listen("tcp", "[::1]:0")
 	check (err)
@@ -480,7 +556,7 @@ func startChatApp(tlsconn *tls.Conn, remoteCN string){
 }
 
 // Start the simple voice app on the encrypted channel.
-func startVoiceApp(tlsconn *tls.Conn, remoteCN string){
+func startVoiceApp(id string, tlsconn *tls.Conn, remoteCN string){
 	// start the speaker part and connect it to our socket
 	spr := exec.Command("/usr/bin/env", "aplay")
 	spr.Stdin = tlsconn
@@ -494,17 +570,13 @@ func startVoiceApp(tlsconn *tls.Conn, remoteCN string){
 	err = mic.Start() // start asynchronously
 	check(err)
 
-	// TODO: write a ping to signal connection
-	// mess := text_to_speech("Connected to %s, chat away!\n", remoteCN)
-	// spr.Write([]byte(mess))
-
 	// wait for it to finish
-	// TODO: find a way to hang up the connection, short of killall arecord/aplay
-	err = mic.Wait()
-	check(err)
-	err = spr.Wait()
-	check(err)
+	// User closes the Tlsconn socket, breaking the mic and spk processes.
+	// Don't check for errors as that's guaranteed.
+	_ = mic.Wait()
+	_ = spr.Wait()
 
+	delete(active_calls, id)
 	tlsconn.Close()
 }
 

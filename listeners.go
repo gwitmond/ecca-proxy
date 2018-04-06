@@ -17,6 +17,28 @@ import (
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 )
 
+type caller struct {
+     //Token  string  // long random id for the user interface to address them
+     UserCN   string
+     App      string
+     Tlsconn *tls.Conn  // the actual tcp connection where the caller is waiting
+}
+
+// Global variable
+var callers_waiting = make(map[string] caller)
+var active_calls    = make(map[string] caller)
+
+func addWaiter(tlsconn *tls.Conn, remoteCN, app string) {
+     token := makeToken()
+     log.Printf("Store %v call from %v under token %v\n", app, remoteCN, token)
+     // TODO: assert token is not in callers_waiting already;
+     callers_waiting[token] = caller {
+         UserCN:  remoteCN,
+	 App:     app,
+	 Tlsconn: tlsconn,
+     }
+     log.Printf("callers_waiting is %v\n", callers_waiting)
+}
 
 // type ipListener struct {
 // 	Endpoint string                  // ip:port
@@ -263,6 +285,7 @@ func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN, a
 
 	// Now we have established an authenticated connection to the EXPECTED party.
 	// Hand the socket to the user app
-	startPayload(tlsconn, userCN, app)
+	addWaiter(tlsconn, userCN, app)
+	//TODO: signal Front-end
 	return
 }

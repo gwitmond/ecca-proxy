@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <div class="container">
+      <h1>Make and receive direct connections</h1>
+	  Data is {{ . }}
+	  <hr>
+      <h3>Receiving calls</h3>
+      {{ if .callers }}
+      <p>
+      <table>
+        <thead><tr><th>Caller</th><th>App</th><th>Accept</th><th>Reject</th></tr></thead>
+        <tbody>
+          {{range $id, $caller := .callers }}
+          <tr>
+	    <td>{{ $caller.UserCN }}</td>
+	    <td>{{ $caller.App }}</td>
+            <td>
+              <form method="POST">
+                <input type="hidden" name="id" value="{{ $id }}">
+                <input type="submit" name="accept" value="Accept">
+              </form>
+            </td>
+	    <td>
+              <form method="POST">
+                <input type="hidden" name="id" value="{{ $id }}">
+                <input type="submit" name="reject" value="Reject">
+              </form>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      </p>
+      {{ else }}
+      <p><em>There are no active callers waiting for you</em></p>
+      {{ end }}
+
+      <h3>Active calls</h3>
+      {{ if .active_calls }}
+      <p>
+      <table>
+        <thead><tr><th>Caller</th><th>App</th><th>Hang up</th></tr></thead>
+        <tbody>
+          {{range $id, $caller := .active_calls }}
+          <tr>
+	    <td>{{ $caller.UserCN }}</td>
+	    <td>{{ $caller.App }}</td>
+            <td>
+              <form method="POST">
+                <input type="hidden" name="id" value="{{ $id }}">
+                <input type="submit" name="hangup" value="Hang up">
+              </form>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      </p>
+      {{ else }}
+      <p><em>There are no active calls</em></p>
+      {{ end }}
+    </div>
+  </body>
+</html>
