@@ -4,10 +4,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
   <link rel="stylesheet" href="/static?file=css/bootstrap.min.css">
   <link rel="stylesheet" href="/static?file=css/style.css">
-  <script src="/static?file=js/jquery-3.1.1.slim.min.js" ></script>
+  <script src="/static?file=js/jquery-3.3.1.js" ></script>
   <script src="/static?file=js/tether.min.js" ></script>
   <script src="/static?file=js/bootstrap.min.js" ></script>
   <script src="/static?file=js/script.js" ></script>
   <script src="/static?file=js/adjectives_nouns.js" ></script>
+  <script>
+    console.log("Starting longpoller");
+    var timeout = 12000; // milliseconds
+
+    succesfn = function(data, status, jqXHR) {
+      console.log("success: " + data);
+      var win = window.open('/direct-connections', 'direct_connections');
+      if (win) { win.focus(); }
+      else { alert('A new incoming call from <' + data + '> in Direct Connections'); }
+      poll();
+    };
+
+    function failfn(jqXHR, status, error) {
+      console.log("status: " + status  + "; error: " + error);
+      poll();
+    };
+
+    function poll() {
+        var req = $.ajax({
+            url: "/longpoll?timeout=" + timeout,
+            timeout: timeout,
+            contentType: 'application/json; charset=utf-8',
+            success: succesfn,
+            error: failfn,
+        });
+    };
+
+
+    poll();
+  </script>
 </head>
 {{end}}

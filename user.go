@@ -24,9 +24,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"encoding/json"
 	"time"
 	"os/exec"
 	"regexp"
+	"strconv"
 	CryptoRand "crypto/rand"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 	"github.com/gwitmond/socks4a"
@@ -39,8 +41,9 @@ var eccaHandlerPath = "/select"
 var eccaManagerPath = "/manage"
 var eccaShowCertPath= "/showcert"
 var eccaStaticPath  = "/static"
-var eccaDirectConnectionPath= "/direct-connection"
+var eccaDirectConnectionsPath= "/direct-connections"
 var eccaDialDirectConnectionPath= "/dial-direct-connection"
+var eccaLongpollPath = "/longpoll"
 
 func redirectToSelector(req *http.Request) (*http.Response) {
 	redirectURL := url.URL{Scheme: "http", Host: eccaHandlerHost, Path: eccaHandlerPath}
@@ -67,12 +70,14 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 		return handleSelect(req, ctx)
 	case eccaManagerPath:
 		return handleManager(req, ctx)
-	case eccaDirectConnectionPath:
+	case eccaDirectConnectionsPath:
 		return handleDirectConnections(req, ctx)
 	case eccaDialDirectConnectionPath:
 		return handleDialDirectConnection(req, ctx)
         case eccaStaticPath:
                 return serveStaticFile(req, ctx)
+	case eccaLongpollPath:
+	        return handleLongpoll(req, ctx)
 	// case eccaShowCertPath:
 	// 	return handleShowCert(req, ctx)
 	}
@@ -116,7 +121,8 @@ func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
 		"js/script.js",
 		"js/adjectives_nouns.js",
 		"js/tether.min.js",
-		"js/jquery-3.1.1.slim.min.js":
+		"js/jquery-3.3.1.min.js",
+		"js/jquery-3.3.1.js":
 		return staticDir.Bytes(staticFileName)
 	}
 	return nil, errors.New("No valid static filename given")
@@ -175,6 +181,38 @@ func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *
 	log.Printf("Unexpected method: %#v", req.Method)
 	return nil, nil
 }
+
+// increase this amount if you have more than 100 friends calling at the same time.
+var lpchan = make(chan *caller, 100)
+
+func signalFrontEnd(caller *caller) {
+     lpchan <- caller
+}
+
+func handleLongpoll (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+    timeout, err := strconv.Atoi(req.URL.Query().Get("timeout"))
+    if err != nil || timeout > 180000 || timeout < 0 {
+        timeout = 60000; // default 60 seconds
+    }
+
+    // Timeout before the client does.
+    // It compensates for transmission delays
+    // and prevents races where we send a reply just after the client has timed out.
+    // That would cause the client to miss an event.
+    timeout = int(0.95 * float32(timeout))
+
+    select {
+    case caller := <- lpchan:
+	json, err := json.Marshal(caller)
+	check(err)
+	resp := makeResponse(req, 200, "application/json", bytes.NewBuffer(json))
+        return nil, resp
+    case <- time.After(time.Duration(timeout) * time.Millisecond):
+        resp := makeResponse(req, 404, "text/plain", bytes.NewBuffer([]byte("timeout")))
+        return nil, resp
+    }
+}
+
 
 func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	var originalURL *url.URL
@@ -537,13 +575,9 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	err = tlsconn.Handshake()
 	check(err)
 
-	id := makeToken()
-	callers_waiting[id] = caller {
-            UserCN:  invitation.ListenerCN,
-	    App:     invitation.Application,
-	    Tlsconn: tlsconn,
-        }
-	go startPayload(id, tlsconn, invitation.ListenerCN, invitation.Application)
+	caller := makeCaller(tlsconn, invitation.ListenerCN, invitation.Application)
+	callers_waiting[caller.Token] = caller
+	go startPayload(caller.Token, tlsconn, invitation.ListenerCN, invitation.Application)
 	return fmt.Sprintf("Starting application: %s.", invitation.Application)
 }
 
