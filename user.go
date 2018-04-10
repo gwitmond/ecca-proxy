@@ -27,12 +27,12 @@ import (
 	"encoding/json"
 	"time"
 	"os/exec"
+	"path"
 	"regexp"
 	"strconv"
 	CryptoRand "crypto/rand"
 	"github.com/gwitmond/eccentric-authentication" // package eccentric
 	"github.com/gwitmond/socks4a"
-        "github.com/GeertJohan/go.rice"
 )
 
 // Global config
@@ -86,7 +86,6 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
 }
 
 func getContentType(staticFileName string) string {
-
 	var contentType string
 
 	switch staticFileName[:3] {
@@ -107,31 +106,17 @@ func getContentType(staticFileName string) string {
 	return contentType
 }
 
-func openFromStaticWhitelist(staticFileName string) ([]byte, error) {
+var templates *template.Template
+var templatesList = []string{
+    "templates/select.html",
+    "templates/embed.html",
+    "templates/showLogins.html",
+    "templates/directConnections.html",
+    "templates/navbar.html",
+    "templates/head.html",
+};
 
-	var staticDir = rice.MustFindBox("./static")
-
-	switch staticFileName {
-		case
-		"css/bootstrap.min.css",
-		"css/style.css",
-		"img/Message-clouds-icon.png",
-		"img/Call-incoming-icon.png",
-		"js/bootstrap.min.js",
-		"js/script.js",
-		"js/adjectives_nouns.js",
-		"js/tether.min.js",
-		"js/jquery-3.3.1.min.js",
-		"js/jquery-3.3.1.js":
-		return staticDir.Bytes(staticFileName)
-	}
-	return nil, errors.New("No valid static filename given")
-}
-
-// uses the name to render "templates/`name`.html"
-// this adds the boilerplate of head.html and navbar.html
-func constructTemplate(name string) (*template.Template) {
-	funcMap := template.FuncMap{
+var funcMap = template.FuncMap{
 		// The name "mod" is what the function will be called in the template text.
 		"mod": func(a int, b int) int {
 			return a % b
@@ -147,16 +132,15 @@ func constructTemplate(name string) (*template.Template) {
 		},
 	}
 
-
-	var templateDir = rice.MustFindBox("./templates")
-
-	var filename = name+".html"
-	var templatestring = templateDir.MustString(filename)
-	var templ = template.Must(template.New(name).Funcs(funcMap).Parse(templatestring))
-	templ.Parse(templateDir.MustString("navbar.html"))
-	templ.Parse(templateDir.MustString("head.html"))
-	return templ
+func initialiseTemplates(baseDir string) {
+	// point the templates to baseDir/.../templates/<name>
+	var temps = []string{}
+	for _, templ := range templatesList {
+	    temps = append(temps, path.Join(baseDir, templ))
+	}
+	templates = template.Must(template.New("templates").Funcs(funcMap).ParseFiles(temps...))
 }
+
 
 func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	req.ParseForm()
@@ -164,19 +148,27 @@ func serveStaticFile(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *
 
 	switch req.Method {
 	case "GET":
-
-		file, err := openFromStaticWhitelist(staticFile)
-		buf := bytes.NewBuffer(file)
-		if err != nil {
-			log.Printf("error reading ", err)
-			resp := makeResponse(req, 404, "text/html", bytes.NewBuffer(nil))
+	        // path.Join cleans the path of ../ rubbish
+	        filename := path.Join(baseDir, "static", staticFile)
+		// test for that rubbish by verifying the prefix
+		if strings.HasPrefix(filename, path.Join(baseDir, "static")) {
+		    contents, err := ioutil.ReadFile(filename)
+		    if err != nil {
+			log.Printf("error reading file: %v; error: %v\n", filename, err)
+			resp := makeResponse(req, 404, "text/plain", bytes.NewBuffer([]byte("Not Found")))
 			return nil, resp
+		    } else {
+		        contentType := getContentType(staticFile)
+		    	buf := bytes.NewBuffer(contents)
+		    	resp := makeResponse(req, 200, contentType, buf)
+		    	return nil, resp
+		    }
+		} else {
+		    log.Printf("error invalid static filename: %v\n", staticFile)
+		    // however, just send the same 404 message.
+		    resp := makeResponse(req, 404, "text/plain", bytes.NewBuffer([]byte("Not Found")))
+		    return nil, resp
 		}
-
-		contentType := getContentType(staticFile)
-
-		resp := makeResponse(req, 200, contentType, buf)
-		return nil, resp
 	}
 	log.Printf("Unexpected method: %#v", req.Method)
 	return nil, nil
@@ -231,8 +223,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 		// User has no active logins.
 		// Show available client certificates for URI.Host
 		creds := getCreds(originalURL.Host)
-		var selectTemplate = constructTemplate("select")
-		buf := execTemplate(selectTemplate, "select", map[string]interface{}{"Creds": creds, "Hostname": originalURL.Host})
+		buf := execTemplate(templates, "select.html", map[string]interface{}{"Creds": creds, "Hostname": originalURL.Host})
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
 	case "POST":
@@ -270,8 +261,7 @@ func handleSelect (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *ht
 			"URL": originalURL.String(),
 			"Comment": cred.Comment,
 		}
-		var embedTemplate = constructTemplate("embed")
-		buf := execTemplate(embedTemplate, "embed", data)
+		buf := execTemplate(templates, "embed.html", data)
 		resp := makeResponse(req, 200, "text/html", buf)
 		return nil, resp
 	}
@@ -384,9 +374,7 @@ func handleManager (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *h
 	switch req.Method {
 	case "GET":
 		details := getAllDetails()
-
-		var showLoginTemplate = constructTemplate("showLogins")
-		buf  := execTemplate(showLoginTemplate, "showLogins", map[string]interface{}{
+		buf := execTemplate(templates, "showLogins.html", map[string]interface{}{
 			"current":    logins,
 			"alldetails": details,
 		})
@@ -420,8 +408,7 @@ func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Re
 	log.Printf("active_calls is %v\n", active_calls)
 	switch req.Method {
 	case "GET":
-		var template = constructTemplate("directConnections")
-		buf  := execTemplate(template, "directConnections", map[string]interface{}{
+		buf  := execTemplate(templates, "directConnections.html", map[string]interface{}{
 		    "callers": callers_waiting,
 		    "active_calls": active_calls,
 		})

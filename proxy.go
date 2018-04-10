@@ -18,6 +18,8 @@ import (
 	"crypto/tls"
 	MathRand   "math/rand"
 	"os"
+	"path"
+	"path/filepath"
 	"io/ioutil"
 	"bytes"
 	"encoding/xml"
@@ -41,8 +43,18 @@ var torSocksPort = flag.String("torsocks", "127.0.0.1:9050", "The address of the
 var torControlPort = flag.String("torcontrolport", "127.0.0.1:9051", "The address of the Tor ControlPort to create hidden services")
 var torControlPassword = flag.String("torcontrolpassword", "geheim", "The password to authenticate at the Tor ControlPort")
 
+var baseDir string // use this to find /templates and /static subdirs
 
 func main() {
+        var err error
+        execPath, err := os.Executable()
+	check(err)
+	realPath, err := filepath.EvalSymlinks(execPath)
+	check(err)
+	baseDir = path.Dir(realPath) + "/"
+	log.Printf("baseDir is: %v\n", baseDir)
+	initialiseTemplates(baseDir)
+
 	flag.Parse()
 	init_datastore(*datastore)
 
