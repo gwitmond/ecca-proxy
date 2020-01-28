@@ -11,7 +11,7 @@ import (
 	"log"
 	"crypto/x509"
 	"crypto/rand"
-	"encoding/base64"
+	"encoding/hex"
 	"strings"
 )
 
@@ -104,12 +104,12 @@ func storeInvitation(invitation *DCInvitation) string {
 	return token
 }
 
-// makeToken makes a 32 byte random value and encodes it into a string
+// makeToken: make a 8 byte random value and encodes it into a string
 func makeToken() string {
-	buf := make([]byte, 32)
+	buf := make([]byte, 8)
 	_, err := rand.Read(buf)
 	check(err)
-	token := base64.StdEncoding.EncodeToString(buf)
+	token := hex.EncodeToString(buf)
 	return token
 }
 
