@@ -416,22 +416,22 @@ func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Re
 		return nil, resp
 	case "POST":
 		id := req.Form.Get("id")
-		accept := req.Form.Get("accept")
-		reject := req.Form.Get("reject")
-		hangup := req.Form.Get("hangup")
+		accept := req.Form.Get("accept") != ""
+		reject := req.Form.Get("reject") != ""
+		hangup := req.Form.Get("hangup") != ""
 
 		if id == "" {
 		    log.Printf("Error: No <id> given. Reject request.\n")
 		} else {
 
-		    if accept != "" || reject != "" {
+		    if accept || reject  {
 		        caller, exists := callers_waiting[id]
 		        if !exists {
 		            // No such id
 		            log.Printf("Error: Id not found in callers_waiting. Reject request.\n")
 		        } else {
 
-		            if accept != "" {
+		            if accept {
                                 // user wants to connect to caller
 				log.Printf("Accepting call from %v\n", caller.UserCN)
 			    	// move caller to active-callers
@@ -442,7 +442,7 @@ func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Re
 			    	go startPayload(id, caller.Tlsconn, caller.UserCN, caller.App)
 		            }
 
-			    if reject != "" {
+			    if reject {
 		                // user wants to refuse the connection
 			    	delete(callers_waiting, id)
 			    	_, _ = caller.Tlsconn.Write([]byte("call refused\n"))
@@ -451,7 +451,7 @@ func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Re
 			}
 		    }
 
-		    if hangup != "" {
+		    if hangup {
 		    	caller, exists := active_calls[id]
 		        if !exists {
 		            // No such id
