@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  {{template "head"}}
+  <script>
+    console.log("Starting chatpoller");
+    var timeout = 60000; // milliseconds
+
+    succesfnpoll = function(data, status, jqXHR) {
+      console.log("chatpoll success: " + JSON.stringify(data));
+      var newp = document.createElement("p")
+      newp.appendChild(document.createTextNode(data.Sender + ": " + data.Message))
+      document.getElementById(data.Token).appendChild(newp)
+      poll();
+    };
+
+    function failfnpoll(jqXHR, status, error) {
+      console.log("chatpoll failed with status: " + status + " and error: " + error);
+      poll();
+    };
+
+    function poll() {
+        var req = $.ajax({
+            url: "/chatpoll?timeout=" + timeout,
+            method: "GET",
+            timeout: timeout,
+            contentType: 'application/json; charset=utf-8',
+            success: succesfnpoll,
+            error: failfnpoll,
+        });
+    };
+
+    function postmessage(formid) {
+      console.log("postmessage: " + formid);
+      var req = $.ajax({
+        url: "/chatpost",
+        method: "POST",
+        data: { "token":   $("#" + formid + " input[name='token']").val(),
+                "message": $("#" + formid + " input[name='message']").val() + "\n",
+              },
+      
+        succes: function() { console.log("post success"); },
+        error:  function() { console.log("post went wrong"); },
+      });
+    };
+    
+    // Start polling on page load.
+    poll();
+  </script>
+
+  <body>
+    {{range $token := .tokens }}
+    <h1>Chat</h1>
+    <h3>{{$token}}</h3>
+    <p id="{{$token}}">
+      Expect chats
+    </p>
+    <p>
+      <form id="form-{{$token}}" method="POST" action="/chatpost" onsubmit='postmessage("form-{{$token}}");return false;'>
+	<input type="hidden" name="token" value="{{$token}}" />
+	<input type="text" name="message">
+	<input type="submit" value="Send">
+      </form>
+    </p>
+    {{end}}
+  </body>
+</html>

@@ -44,6 +44,9 @@ var eccaStaticPath  = "/static"
 var eccaDirectConnectionsPath= "/direct-connections"
 var eccaDialDirectConnectionPath= "/dial-direct-connection"
 var eccaLongpollPath = "/longpoll"
+var eccaChatPath = "/chat"
+var eccaChatpollPath = "/chatpoll"
+var eccaChatPostPath = "/chatpost"
 
 func redirectToSelector(req *http.Request) (*http.Response) {
 	redirectURL := url.URL{Scheme: "http", Host: eccaHandlerHost, Path: eccaHandlerPath}
@@ -78,6 +81,12 @@ func eccaHandler (req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *htt
                 return serveStaticFile(req, ctx)
 	case eccaLongpollPath:
 	        return handleLongpoll(req, ctx)
+	case eccaChatpollPath:
+	        return handleChatpoll(req, ctx)
+	case eccaChatPath:
+	        return handleChat(req, ctx)
+	case eccaChatPostPath:
+	        return handleChatPostPath(req, ctx)
 	// case eccaShowCertPath:
 	// 	return handleShowCert(req, ctx)
 	}
@@ -114,6 +123,7 @@ var templatesList = []string{
     "templates/directConnections.html",
     "templates/navbar.html",
     "templates/head.html",
+    "templates/chat.html",
 };
 
 var funcMap = template.FuncMap{
@@ -439,7 +449,7 @@ func handleDirectConnections(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Re
 			    	active_calls[id] = caller
 			    	// signal acceptance and get going
 			    	_, _ = caller.Tlsconn.Write([]byte("call accepted\n"))
-			    	go startPayload(id, caller.Tlsconn, caller.UserCN, caller.App)
+			    	return startPayload(req, ctx, id, caller.Tlsconn, caller.UserCN, caller.App)
 		            }
 
 			    if reject {
@@ -518,8 +528,7 @@ func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 		//log.Printf("ourCert is: %#v", ourCert)
 
 		// call out and show the response
-		response := dialDirectConnection(invitation, ourCert)
-		return nil, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusOK, response)
+		return dialDirectConnection(req, ctx, invitation, ourCert)
 	}
 
 	log.Printf("Unexpected method: %#v", req.Method)
@@ -528,7 +537,7 @@ func handleDialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 
 
 // dial the direct connection and start a conversation
-func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) string {
+func dialDirectConnection(req *http.Request, ctx *goproxy.ProxyCtx,invitation *DCInvitation, ourCert tls.Certificate) (*http.Request, *http.Response) {
 	fpca, err := eccentric.ParseCertByteA(invitation.ListenerFPCAPEM)
 	check(err)
 	log.Printf("FPCA is %v", fpca.Subject.CommonName)
@@ -554,7 +563,7 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 	conn, err := socks.Dial(invitation.Endpoint)
 	if err != nil {
 		log.Printf("Error dialing endpoint: %#v; reason: %#v", invitation.Endpoint, err)
-		return fmt.Sprintf("Error dialing endpoint: %#v; reason: %#v", invitation.Endpoint, err)
+		return nil, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusOK, fmt.Sprintf("Error dialing endpoint: %#v; reason: %v", invitation.Endpoint, err))
 	}
 
 	// start TLS over the onion connection
@@ -564,27 +573,30 @@ func dialDirectConnection(invitation *DCInvitation, ourCert tls.Certificate) str
 
 	caller := makeCaller(tlsconn, invitation.ListenerCN, invitation.Application)
 	callers_waiting[caller.Token] = caller
-	go startPayload(caller.Token, tlsconn, invitation.ListenerCN, invitation.Application)
-	return fmt.Sprintf("Starting application: %s.", invitation.Application)
+	return startPayload(req, ctx, caller.Token, caller.Tlsconn, caller.UserCN, caller.App)
 }
+
 
 // Start the requested application eg. chat/voice/video etc
-func startPayload(id string, tlsconn *tls.Conn, remoteCN, app string){
+func startPayload(req *http.Request, ctx *goproxy.ProxyCtx, token string, tlsconn *tls.Conn, remoteCN, app string)  (*http.Request, *http.Response) {
 	switch app {
-	case "chat": startChatApp(id, tlsconn, remoteCN)
-	case "voice": startVoiceApp(id, tlsconn, remoteCN)
+	case "chat":  return startWebChatApp(req, ctx, token, tlsconn, remoteCN)
+	case "voice": return startVoiceApp  (req, ctx, token, tlsconn, remoteCN)
 	}
+	return nil, nil
 }
 
+
+// Deprecated
 // Start the simple chat app on the encrypted channel.
-func startChatApp(id string, tlsconn *tls.Conn, remoteCN string){
+func startChatApp(id string, tlsconn *tls.Conn, remoteCN string) {
 	// Create listener socket for the simple chat
-	socket, err := net.Listen("tcp", "[::1]:0")
+	socket, err := net.Listen("tcp", "127.0.0.1:0")
 	check (err)
 	port := getPort(socket.Addr().String())
 
 	// start the chat app and point it to our socket
-	cmd := exec.Command("uxterm", "-e", "nc", "-6", "::1", port)
+	cmd := exec.Command("uxterm", "-e", "nc", "-4", "127.0.0.1", port)
 
 	err = cmd.Start() // start asynchronously
 	check(err)
@@ -614,7 +626,7 @@ func startChatApp(id string, tlsconn *tls.Conn, remoteCN string){
 }
 
 // Start the simple voice app on the encrypted channel.
-func startVoiceApp(id string, tlsconn *tls.Conn, remoteCN string){
+func startVoiceApp(req *http.Request, ctx *goproxy.ProxyCtx, id string, tlsconn *tls.Conn, remoteCN string)  (*http.Request, *http.Response) {
 	// start the speaker part and connect it to our socket
 	spr := exec.Command("/usr/bin/env", "aplay")
 	spr.Stdin = tlsconn
@@ -636,6 +648,9 @@ func startVoiceApp(id string, tlsconn *tls.Conn, remoteCN string){
 
 	delete(active_calls, id)
 	tlsconn.Close()
+	
+        //TODO: do the rest of the rewrite
+        return nil,nil
 }
 
 // var handleInitiateDirectConnectionTemplate = template.Must(template.New("initiateDirectConnection").Parse(
