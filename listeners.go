@@ -50,6 +50,7 @@ func makeCaller(tlsconn *tls.Conn, remoteCN, app string) *caller {
 type Listener interface {
      Store()
      Restart()
+     StartApplication(tlsconn *tls.Conn)
 }
 
 // type ipListener struct {
@@ -180,7 +181,7 @@ func restartAllTorListeners() {
 }
 
 
-// func startListener(listener listener) {
+// func startIPListener(listener listener) {
 // 	// The CA-pool specifies which client certificates can log in to our site.
 // 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
 // 	pool := x509.NewCertPool()
@@ -231,7 +232,7 @@ func (listener TorTLSlistener) Restart() {
 
 
 func startListener(netl net.Listener, listener TorTLSlistener) {
-	// The CA-pool specifies which client certificates can log in to our site.
+	// The CA-pool specifies which client certificates can log in to our listener
 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
 	pool := x509.NewCertPool()
 	pool.AddCert(&CallerFPCACert)
@@ -239,35 +240,36 @@ func startListener(netl net.Listener, listener TorTLSlistener) {
 	listenerTLSCert, err := tls.X509KeyPair(listener.ListenerTLSCertPEM, listener.ListenerTLSPrivKeyPEM)
 	check(err)
 
-	listenerConfig :=  &tls.Config{
+	tlsConfig :=  &tls.Config{
 		ServerName: listener.ListenerCN,
 		Certificates: []tls.Certificate{listenerTLSCert},
 		ClientCAs: pool,
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
-	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN, listener.Application)
+	go AwaitIncomingConnection(netl, tlsConfig, listener)
 }
 
 
 // Await Incoming connection on the given net.Listener.
-func AwaitIncomingConnection(listener net.Listener, serverConfig *tls.Config, userCN, app string) {
-	log.Printf("Awaiting connections on %v", listener.Addr())
+func AwaitIncomingConnection(netl net.Listener, tlsConfig *tls.Config, listener TorTLSlistener) {
+	log.Printf("Awaiting connections on %v", netl.Addr())
+	//TODO register this connection in a global map to be able to tear it down
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := netl.Accept()
 		check(err)
-		go answerIncomingConnection(conn, serverConfig, userCN, app)
+		go answerIncomingConnection(conn, tlsConfig, listener)
 	}
 }
 
 
 // Answer the incoming connection, verify the identity of the remote party.
 // Hang up if it is not the one we expect.
-func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN, app string) {
+func answerIncomingConnection(conn net.Conn, tlsConfig *tls.Config, listener TorTLSlistener) {
 	log.Printf("Connection from: %v", conn.RemoteAddr())
 
-	tlsconn := tls.Server(conn, serverConfig)
+	tlsconn := tls.Server(conn, tlsConfig)
 	err := tlsconn.Handshake()
 	if err != nil {
 		log.Printf("Listener could not perform TLS handshake: %v", err)
@@ -288,8 +290,8 @@ func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN, a
 		return
 	}
 
-	if peerCerts[0].Subject.CommonName != userCN {
-		log.Printf("Rejecting user %v is not %v.", peerCerts[0].Subject.CommonName, userCN)
+	if peerCerts[0].Subject.CommonName != listener.CallerCN {
+		log.Printf("Rejecting user %v is not %v.", peerCerts[0].Subject.CommonName, listener.CallerCN)
 		_, err := conn.Write([]byte("We don't expect you. Go Away."))
 		check(err)
 		tlsconn.Close()
@@ -298,8 +300,13 @@ func answerIncomingConnection(conn net.Conn, serverConfig *tls.Config, userCN, a
 
 	// Now we have established an authenticated connection to the EXPECTED party.
 	// Hand the socket to the user app
-	caller := makeCaller(tlsconn, userCN, app)
+	listener.StartApplication(tlsconn)
+
+	return
+}
+
+func (listener TorTLSlistener) StartApplication(tlsconn *tls.Conn) {
+	caller := makeCaller(tlsconn, listener.CallerCN, listener.Application)
 	callers_waiting[caller.Token] = caller
 	signalFrontEnd(caller)
-	return
 }
