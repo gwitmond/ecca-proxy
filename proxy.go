@@ -308,7 +308,7 @@ func initiateDirectConnection (req *http.Request) (*http.Request, *http.Response
 		listener := createTorListener(ourCreds, recipCert, application)
 		// Store listening address in database to listen again at restart of the proxy.
 		// I.E. make these listening endpoints permanent.
-		storeListener(listener)
+		listener.Store()
 
 		hostname := getHostname(ourCreds.Hostname)
 		invitation := DCInvitation{

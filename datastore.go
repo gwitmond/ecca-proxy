@@ -26,7 +26,7 @@ func init_datastore(datastore string) {
         check(err)
         dbmap = &gorp.DbMap{Db: db, Dialect: gorp.SqliteDialect{}}
         dbmap.AddTableWithName(credentials{}, "credentials").SetKeys(true, "Id")
-	dbmap.AddTableWithName(listener{}, "listeners")
+	dbmap.AddTableWithName(TorTLSlistener{}, "listeners")
         dbmap.CreateTables() // if not exists
 
         //dbmap.TraceOn("[gorp]", log.New(os.Stdout, "myapp:", log.Lmicroseconds))
@@ -99,21 +99,21 @@ func getCredentials(args... interface{}) (creds []credentials, err error) {
 
 // Listeners
 
-func storeListener(listener listener) {
+func (listener TorTLSlistener) Store() {
 	check(dbmap.Insert(&listener))
 }
 
 // Just get all listeners
-func getAllListeners () ([]listener, error) {
+func getAllListeners () ([]TorTLSlistener, error) {
 	query := "SELECT * FROM listeners"
 
-        dbls, err := dbmap.Select(listener{}, query)
+        dbls, err := dbmap.Select(TorTLSlistener{}, query)
         if err != nil { return nil, err }
 
 	// ugly boilerplate. Can this be done better?
-	var res = make([]listener, len(dbls))
+	var res = make([]TorTLSlistener, len(dbls))
 	for i, e := range dbls {
-		res[i] = *e.(*listener)
+		res[i] = *e.(*TorTLSlistener)
 	}
 	return res, nil
 }

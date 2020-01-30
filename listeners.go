@@ -46,6 +46,12 @@ func makeCaller(tlsconn *tls.Conn, remoteCN, app string) *caller {
      }
 }
 
+
+type Listener interface {
+     Store()
+     Restart()
+}
+
 // type ipListener struct {
 // 	Endpoint string                  // ip:port
 // 	ListenerCN string                // our CN (server name)
@@ -59,7 +65,7 @@ func makeCaller(tlsconn *tls.Conn, remoteCN, app string) *caller {
 // }
 
 
-type listener struct {
+type TorTLSlistener struct {
 	Application string               // chat/voice/video/ etc, as long as both endpoints agree
 	OnionAddress string              // xyz.onion address
 	Endpoint string                  // our local listening point (where the onion data gets delivered)
@@ -75,11 +81,12 @@ type listener struct {
 }
 
 
+
 /* createTorListener creates and starts a Tor Hidden Service
  * to let the given caller connect using the app.
  * Returns: the listener details to recreate it at a later run.
  */
-func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app string) (listener) {
+func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app string) (TorTLSlistener) {
 	// check to see if we get sane credentials
 	_, err := tls.X509KeyPair(ourCreds.Cert, ourCreds.Priv)
 	check(err)
@@ -100,7 +107,7 @@ func createTorListener(ourCreds *credentials, callerCert *x509.Certificate, app 
 	// Create a .onion endpoint at port 443
 	onionAddress, onionPrivKey := createTorHiddenService("443", endpoint)
 
-	listener := listener {
+	listener := TorTLSlistener {
 		Application: app,
 		Endpoint: endpoint,
 		ListenerCN: ourCreds.CN,
@@ -168,7 +175,7 @@ func restartAllTorListeners() {
 	check(err)
 
 	for _, listener := range listeners {
-		restartTorListener(listener)
+		listener.Restart()
 	}
 }
 
@@ -195,7 +202,7 @@ func restartAllTorListeners() {
 // 	go AwaitIncomingConnection(netl, listenerConfig, listener.CallerCN)
 // }
 
-func restartTorListener(listener listener) {
+func (listener TorTLSlistener) Restart() {
 	// This is what we want:
 	// use a fresh port guaranteed to be available
 	//netl, err := net.Listen("tcp", "127.0.0.1:0")
@@ -223,7 +230,7 @@ func restartTorListener(listener listener) {
 }
 
 
-func startListener(netl net.Listener, listener listener) {
+func startListener(netl net.Listener, listener TorTLSlistener) {
 	// The CA-pool specifies which client certificates can log in to our site.
 	CallerFPCACert := eccentric.PEMDecode(listener.CallerFPCACertPEM)
 	pool := x509.NewCertPool()
